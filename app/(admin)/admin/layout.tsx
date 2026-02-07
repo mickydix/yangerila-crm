@@ -8,7 +8,7 @@ import {
   MessageCircle, 
   LogOut,
   ShieldCheck,
-  Database // <--- Imported Database Icon
+  Database
 } from "lucide-react";
 import { useAuth } from "@/lib/useAuth";
 import { getAuth, signOut } from "firebase/auth";
@@ -36,17 +36,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { name: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { name: "Enquiries", href: "/admin/enquiries", icon: MessageCircle },
     { name: "Admissions", href: "/admin/admissions", icon: Users },
-    { name: "Data", href: "/admin/data", icon: Database }, // <--- NEW OPTION HERE
+    { name: "Data", href: "/admin/data", icon: Database }, 
     { name: "SRM Team", href: "/admin/srms", icon: ShieldCheck }, 
   ];
 
   if (loading) return null;
 
   return (
-    <div className="flex h-screen bg-[#F5F0EB] text-[#4A4036]">
+    <div className="flex min-h-screen bg-[#F5F0EB] text-[#4A4036]">
       
-      {/* SIDEBAR */}
-      <aside className="w-64 bg-[#FDFDFD] border-r border-[#E8E0D5] flex flex-col fixed inset-y-0 z-50 shadow-sm">
+      {/* --- DESKTOP SIDEBAR (Hidden on Mobile) --- */}
+      <aside className="hidden md:flex w-64 bg-[#FDFDFD] border-r border-[#E8E0D5] flex-col fixed inset-y-0 z-50 shadow-sm">
         <div className="p-8 border-b border-[#E8E0D5]">
           <h1 className="text-2xl font-serif font-bold tracking-wide text-[#2D241E]">
             Yangerila
@@ -85,8 +85,39 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* CONTENT AREA */}
-      <main className="flex-1 ml-64 h-full overflow-y-auto p-8">
+      {/* --- MOBILE BOTTOM NAV (Visible only on Mobile) --- */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-[#FDFDFD] border-t border-[#E8E0D5] z-50 px-6 py-3 flex justify-between items-center shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+          {navItems.slice(0, 4).map((item) => { // Show first 4 items only to fit space
+            const isActive = pathname === item.href;
+            return (
+              <Link 
+                key={item.href} 
+                href={item.href}
+                className={`flex flex-col items-center gap-1 transition-all ${
+                  isActive ? "text-[#2D241E]" : "text-[#C5A880]"
+                }`}
+              >
+                <div className={`p-2 rounded-full ${isActive ? "bg-[#2D241E] text-white" : ""}`}>
+                    <item.icon size={20} strokeWidth={2} />
+                </div>
+                {/* Optional: Hide label for cleaner look, or keep it tiny */}
+                <span className="text-[10px] font-bold">{item.name}</span>
+              </Link>
+            );
+          })}
+          {/* Mobile Sign Out (Small Icon) */}
+          <button onClick={handleLogout} className="flex flex-col items-center gap-1 text-[#D96C6C]">
+             <div className="p-2"><LogOut size={20} /></div>
+             <span className="text-[10px] font-bold">Exit</span>
+          </button>
+      </div>
+
+      {/* --- CONTENT AREA (Adjusted margins) --- */}
+      <main className="flex-1 md:ml-64 w-full h-full p-4 md:p-8 pb-24 md:pb-8">
+        {/* Mobile-only Header */}
+        <div className="md:hidden mb-6 flex justify-between items-center">
+             <h1 className="text-xl font-serif font-bold text-[#2D241E]">Yangerila Admin</h1>
+        </div>
         {children}
       </main>
 
