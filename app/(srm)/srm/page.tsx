@@ -111,7 +111,8 @@ export default function SRMDashboard() {
               enqId: enqId,
               status: form.status,
               lastAction: form.action,
-              lastActionDate: Timestamp.now(),
+              // --- CHANGE HERE: Set to null so it shows up in "Cards" today ---
+              lastActionDate: null, 
               lastRemark: form.remark,
               nextAction: form.nextAction || "Follow up",
               nextActionDate: Timestamp.fromDate(new Date(form.nextActionDate)),
