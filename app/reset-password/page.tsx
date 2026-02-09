@@ -1,14 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getAuth, verifyPasswordResetCode, confirmPasswordReset } from "firebase/auth";
-import { Eye, EyeOff, CheckCircle2, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const oobCode = searchParams.get("oobCode"); // The secret key from the email
+  const oobCode = searchParams.get("oobCode"); 
   const auth = getAuth();
 
   // State
@@ -29,10 +29,9 @@ export default function ResetPasswordPage() {
       return;
     }
 
-    // Check if the code is valid
     verifyPasswordResetCode(auth, oobCode)
       .then((email) => {
-        setEmail(email); // It works! We know who this is.
+        setEmail(email); 
         setStatus("input");
       })
       .catch((e) => {
@@ -63,30 +62,34 @@ export default function ResetPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-center">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4 font-sans">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 p-8 text-center relative overflow-hidden">
         
+        {/* Top Decoration */}
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-black via-gray-500 to-black"></div>
+
         {/* --- STATE: LOADING --- */}
         {status === "loading" && (
-            <div className="py-10 animate-pulse">
-                <div className="h-4 w-1/2 bg-gray-200 rounded mx-auto mb-4"></div>
-                <p className="text-gray-400 text-sm">Verifying secure link...</p>
+            <div className="py-12 animate-pulse flex flex-col items-center">
+                <div className="h-12 w-12 bg-gray-200 rounded-full mb-4"></div>
+                <div className="h-4 w-3/4 bg-gray-200 rounded mb-2"></div>
+                <p className="text-gray-400 text-xs mt-2 uppercase tracking-widest">Verifying Secure Link...</p>
             </div>
         )}
 
         {/* --- STATE: ERROR --- */}
         {status === "error" && (
             <div className="py-6">
-                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-red-50">
                     <AlertCircle size={32} />
                 </div>
                 <h2 className="text-xl font-bold text-gray-900 mb-2">Link Invalid</h2>
-                <p className="text-gray-500 mb-6">{errorMsg}</p>
+                <p className="text-gray-500 mb-8 text-sm">{errorMsg}</p>
                 <button 
                     onClick={() => router.push("/login")}
-                    className="text-black font-bold hover:underline"
+                    className="w-full py-3 rounded-xl border border-gray-200 text-gray-700 font-bold hover:bg-gray-50 transition-all"
                 >
-                    Back to Login
+                    Return to Login
                 </button>
             </div>
         )}
@@ -94,44 +97,47 @@ export default function ResetPasswordPage() {
         {/* --- STATE: SUCCESS --- */}
         {status === "success" && (
             <div className="py-6 animate-in zoom-in duration-300">
-                <div className="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <div className="w-16 h-16 bg-green-50 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4 border-4 border-green-50">
                     <CheckCircle2 size={32} />
                 </div>
-                <h2 className="text-xl font-bold text-gray-900 mb-2">Password Reset!</h2>
-                <p className="text-gray-500 mb-6">Your password has been updated successfully.</p>
+                <h2 className="text-xl font-bold text-gray-900 mb-2">Password Updated!</h2>
+                <p className="text-gray-500 mb-8 text-sm">You can now sign in with your new password.</p>
                 <button 
                     onClick={() => router.push("/login")}
-                    className="w-full bg-black text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition-all"
+                    className="w-full bg-black text-white py-3.5 rounded-xl font-bold hover:bg-gray-800 shadow-lg transition-all"
                 >
-                    Login with New Password
+                    Back to Login
                 </button>
             </div>
         )}
 
-        {/* --- STATE: INPUT (The Real Form) --- */}
+        {/* --- STATE: INPUT (The Form) --- */}
         {status === "input" && (
             <div className="animate-in slide-in-from-bottom-4 duration-500 text-left">
-                <h1 className="text-2xl font-bold text-gray-900 text-center mb-1">Reset Password</h1>
-                <p className="text-sm text-gray-500 text-center mb-8">for {email}</p>
+                <div className="flex justify-center mb-4 text-gray-900">
+                    <Lock size={32} strokeWidth={1.5} />
+                </div>
+                <h1 className="text-2xl font-bold text-gray-900 text-center mb-1">Set New Password</h1>
+                <p className="text-xs text-gray-400 text-center mb-8 uppercase tracking-wide">for {email}</p>
 
-                <div className="space-y-4">
+                <div className="space-y-5">
                     
                     {/* New Password */}
                     <div>
                         <label className="text-xs font-bold text-gray-500 uppercase ml-1">New Password</label>
-                        <div className="relative mt-1">
+                        <div className="relative mt-1 group">
                             <input 
                                 type={showPassword ? "text" : "password"}
-                                className="w-full border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-black focus:ring-1 focus:ring-black transition-all"
+                                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:bg-white focus:border-black focus:ring-1 focus:ring-black transition-all"
                                 placeholder="Min 6 chars"
                                 value={newPassword}
                                 onChange={e => setNewPassword(e.target.value)}
                             />
                             <button 
                                 onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-3.5 text-gray-400 hover:text-black"
+                                className="absolute right-3 top-3.5 text-gray-400 hover:text-black transition-colors"
                             >
-                                {showPassword ? <EyeOff size={18}/> : <Eye size={18}/>}
+                                {showPassword ? <EyeOff size={20}/> : <Eye size={20}/>}
                             </button>
                         </div>
                     </div>
@@ -141,8 +147,8 @@ export default function ResetPasswordPage() {
                         <label className="text-xs font-bold text-gray-500 uppercase ml-1">Confirm Password</label>
                         <input 
                             type={showPassword ? "text" : "password"}
-                            className="w-full border border-gray-300 rounded-xl px-4 py-3 outline-none focus:border-black focus:ring-1 focus:ring-black transition-all mt-1"
-                            placeholder="Type it again"
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3.5 outline-none focus:bg-white focus:border-black focus:ring-1 focus:ring-black transition-all mt-1"
+                            placeholder="Retype password"
                             value={confirmPassword}
                             onChange={e => setConfirmPassword(e.target.value)}
                         />
@@ -150,9 +156,9 @@ export default function ResetPasswordPage() {
 
                     <button 
                         onClick={handleReset}
-                        className="w-full bg-black text-white py-3.5 rounded-xl font-bold hover:bg-gray-800 shadow-lg mt-4 transition-all active:scale-[0.98]"
+                        className="w-full bg-black text-white py-4 rounded-xl font-bold hover:bg-gray-800 shadow-lg mt-2 transition-all active:scale-[0.98]"
                     >
-                        Save New Password
+                        Update Password
                     </button>
 
                 </div>
@@ -162,4 +168,13 @@ export default function ResetPasswordPage() {
       </div>
     </div>
   );
+}
+
+// Wrap in Suspense for Next.js build optimization
+export default function ResetPasswordPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+            <ResetPasswordContent />
+        </Suspense>
+    );
 }
