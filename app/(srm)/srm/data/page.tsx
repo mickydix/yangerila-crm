@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { 
   Search, 
@@ -9,11 +9,14 @@ import {
   XCircle,
   Calendar as CalendarIcon,
   ArrowUpDown,
-  ListFilter
+  ListFilter,
+  Eye,
+  Check,
+  ChevronDown
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, getDocs, orderBy, where, Timestamp } from "firebase/firestore";
-import { format, startOfMonth, endOfMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, parse } from "date-fns";
 import { useAuth } from "@/lib/useAuth";
 
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
@@ -55,27 +58,57 @@ export default function SRMDataPage() {
 
   // Date Filter State
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
+  const [isAllTime, setIsAllTime] = useState(false); // 👈 Added this
 
-  // Fetch Data
+  // UI State for Dropdowns
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+  const [showDateMenu, setShowDateMenu] = useState(false);
+  const dateMenuRef = useRef<HTMLDivElement>(null);
+
+  const [visibleCols, setVisibleCols] = useState({
+      created: true,
+      nameId: true,
+      status: true,
+      closedOn: true,
+      remark: true
+  });
+
+  // Handle outside clicks for all menus
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) setShowColumnMenu(false);
+        if (statusMenuRef.current && !statusMenuRef.current.contains(event.target as Node)) setShowStatusMenu(false);
+        if (dateMenuRef.current && !dateMenuRef.current.contains(event.target as Node)) setShowDateMenu(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Fetch Data (Logic updated to support All Time)
   useEffect(() => {
     const fetchData = async () => {
       if (!appUser?.srmId) return;
 
       setLoading(true);
       try {
-        const [year, month] = selectedMonth.split("-").map(Number);
-        const date = new Date(year, month - 1);
-        const start = Timestamp.fromDate(startOfMonth(date));
-        const end = Timestamp.fromDate(endOfMonth(date));
-
-        const q = query(
+        let q = query(
             collection(db, "enquiries"), 
             where("srmId", "==", appUser.srmId),
-            where("status", "in", ["JOINED", "NOT_JOINING"]), 
-            where("createdAt", ">=", start),
-            where("createdAt", "<=", end),
-            orderBy("createdAt", "desc")
+            where("status", "in", ["JOINED", "NOT_JOINING"])
         );
+
+        if (!isAllTime) {
+            const [year, month] = selectedMonth.split("-").map(Number);
+            const date = new Date(year, month - 1);
+            const start = Timestamp.fromDate(startOfMonth(date));
+            const end = Timestamp.fromDate(endOfMonth(date));
+            q = query(q, where("createdAt", ">=", start), where("createdAt", "<=", end));
+        }
+
+        q = query(q, orderBy("createdAt", "desc"));
         
         const snap = await getDocs(q);
         setEnquiries(snap.docs.map(d => ({ id: d.id, ...d.data() } as Enquiry)));
@@ -86,7 +119,7 @@ export default function SRMDataPage() {
       }
     };
     fetchData();
-  }, [selectedMonth, appUser]);
+  }, [selectedMonth, isAllTime, appUser]);
 
   const handleEnquiryUpdate = (updated: Enquiry) => {
       if (updated.status !== "JOINED" && updated.status !== "NOT_JOINING") {
@@ -113,7 +146,7 @@ export default function SRMDataPage() {
   };
 
   const filteredList = useMemo(() => {
-      let result = enquiries;
+      let result = [...enquiries];
       
       if (activeFilter !== "ALL") result = result.filter(e => e.status === activeFilter);
       
@@ -131,6 +164,11 @@ export default function SRMDataPage() {
       return result;
   }, [enquiries, activeFilter, searchTerm, sortBy, sortOrder]);
 
+  const activeStatusConfig = DATA_STATUS_CONFIG.find(s => s.value === activeFilter);
+  const filterButtonStyle = activeFilter === "ALL" 
+      ? "bg-[#2D241E] text-white border-[#2D241E]" 
+      : `${activeStatusConfig?.color} ring-1 ring-black/5`;
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
         <div className="space-y-4">
@@ -142,8 +180,8 @@ export default function SRMDataPage() {
                 <h1 className="text-2xl font-serif font-bold text-[#2D241E]">Archived Data</h1>
             </div>
             
-            {/* Controls */}
-            <div className="flex flex-col md:flex-row gap-4">
+            {/* Row 1: Search & Visibility Toggle */}
+            <div className="flex w-full gap-2">
                 <div className="relative flex-1">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8C7B6C]" size={20} />
                     <input 
@@ -154,87 +192,190 @@ export default function SRMDataPage() {
                     />
                 </div>
 
-                <div className="relative">
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8C7B6C] pointer-events-none">
-                        <CalendarIcon size={18} />
-                    </div>
-                    <input 
-                        type="month" 
-                        value={selectedMonth}
-                        onChange={(e) => setSelectedMonth(e.target.value)}
-                        className="pl-12 pr-4 py-3 bg-white border border-[#E8E0D5] rounded-xl outline-none focus:ring-2 focus:ring-[#C5A880] font-bold text-[#4A4036] cursor-pointer shadow-sm"
-                    />
+                <div className="relative" ref={columnMenuRef}>
+                    <button 
+                        onClick={() => setShowColumnMenu(!showColumnMenu)}
+                        className="h-full px-3.5 bg-white border border-[#E8E0D5] rounded-xl hover:bg-[#F5F0EB] transition-colors text-[#4A4036] shadow-sm flex items-center justify-center"
+                    >
+                        <Eye size={20} />
+                    </button>
+                    
+                    {showColumnMenu && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="text-xs font-bold text-[#8C7B6C] px-2 py-1 uppercase tracking-wider mb-1">Show Columns</div>
+                            <div className="space-y-1">
+                                {[
+                                    { key: "created", label: "Date Created" },
+                                    { key: "nameId", label: "Name & ID" },
+                                    { key: "status", label: "Final Status" },
+                                    { key: "closedOn", label: "Closed On" },
+                                    { key: "remark", label: "Closing Remark" },
+                                ].map((col) => (
+                                    <button
+                                        key={col.key}
+                                        onClick={() => setVisibleCols(prev => ({ ...prev, [col.key]: !prev[col.key as keyof typeof visibleCols] }))}
+                                        className="w-full flex items-center justify-between px-2 py-2 text-sm rounded-lg hover:bg-[#F5F0EB] text-[#4A4036] transition-colors"
+                                    >
+                                        <span>{col.label}</span>
+                                        {visibleCols[col.key as keyof typeof visibleCols] && (
+                                            <Check size={16} className="text-[#15803D]" />
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-                <button onClick={() => setActiveFilter("ALL")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${activeFilter === "ALL" ? "bg-[#2D241E] text-white border-[#2D241E]" : "bg-white text-[#8C7B6C] border-[#E8E0D5] hover:bg-[#F5F0EB]"}`}>All Closed</button>
-                {DATA_STATUS_CONFIG.map(status => (
-                    <button key={status.value} onClick={() => setActiveFilter(status.value)} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${activeFilter === status.value ? "ring-1 ring-black/10 " + status.color : "bg-white text-[#8C7B6C] border-[#E8E0D5] hover:bg-[#F5F0EB]"}`}>{status.label}</button>
-                ))}
+            {/* Row 2: Dropdown Filters */}
+            <div className="flex flex-wrap gap-3">
+                {/* Status Filter Dropdown */}
+                <div className="relative inline-block text-left" ref={statusMenuRef}>
+                    <button 
+                        onClick={() => setShowStatusMenu(!showStatusMenu)}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all border shadow-sm ${filterButtonStyle}`}
+                    >
+                        <span>{activeFilter === "ALL" ? "All Closed" : activeStatusConfig?.label}</span>
+                        <ChevronDown size={16} />
+                    </button>
+
+                    {showStatusMenu && (
+                        <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            <button 
+                                onClick={() => { setActiveFilter("ALL"); setShowStatusMenu(false); }}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${activeFilter === "ALL" ? "bg-[#2D241E] text-white" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                            >
+                                All Closed
+                                {activeFilter === "ALL" && <Check size={14} />}
+                            </button>
+                            
+                            {DATA_STATUS_CONFIG.map(status => (
+                                <button 
+                                    key={status.value} 
+                                    onClick={() => { setActiveFilter(status.value); setShowStatusMenu(false); }}
+                                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${activeFilter === status.value ? status.color + " ring-1 ring-black/5" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                                >
+                                    {status.label}
+                                    {activeFilter === status.value && <Check size={14} />}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Date Filter Dropdown (Updated with All Time) */}
+                <div className="relative inline-block text-left" ref={dateMenuRef}>
+                    <button 
+                        onClick={() => setShowDateMenu(!showDateMenu)}
+                        className={`flex items-center gap-2 px-4 py-2.5 bg-white border border-[#E8E0D5] rounded-lg text-sm font-bold transition-all shadow-sm text-[#4A4036] hover:bg-[#F5F0EB]`}
+                    >
+                        <CalendarIcon size={16} className="text-[#8C7B6C]" />
+                        <span>{isAllTime ? "All Time" : format(parse(selectedMonth, "yyyy-MM", new Date()), "MMMM yyyy")}</span>
+                        <ChevronDown size={16} className="text-[#8C7B6C]" />
+                    </button>
+
+                    {showDateMenu && (
+                        <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            {/* All Time Toggle */}
+                            <button 
+                                onClick={() => { setIsAllTime(true); setShowDateMenu(false); }}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${isAllTime ? "bg-[#2D241E] text-white" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                            >
+                                <div className="flex items-center gap-2">
+                                    <ListFilter size={16} /> All Time
+                                </div>
+                                {isAllTime && <Check size={14} />}
+                            </button>
+
+                            <div className="px-3 py-2 border-t border-[#E8E0D5] mt-1">
+                                <div className="text-[10px] font-bold text-[#8C7B6C] uppercase tracking-wider mb-2">Select Archive Month</div>
+                                <input 
+                                    type="month" 
+                                    value={selectedMonth}
+                                    onChange={(e) => {
+                                        setSelectedMonth(e.target.value);
+                                        setIsAllTime(false);
+                                        setShowDateMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2 bg-[#F5F0EB] border border-[#E8E0D5] rounded-lg text-sm font-bold text-[#4A4036] outline-none focus:ring-2 focus:ring-[#C5A880]"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
 
+        {/* Table Section */}
         <div className="bg-[#FDFDFD] border border-[#E8E0D5] rounded-3xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="bg-[#F5F0EB] border-b border-[#E8E0D5] text-xs uppercase tracking-wider text-[#8C7B6C] font-bold select-none">
-                            <th 
-                                className="p-4 w-40 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
-                                onClick={() => handleSort("createdAt")}
-                            >
-                                <div className="flex items-center gap-1">
-                                    Date Created
-                                    <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "createdAt" ? "opacity-100 text-[#2D241E]" : ""}`} />
-                                </div>
-                            </th>
+                            {visibleCols.created && (
+                                <th 
+                                    className="p-4 w-40 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
+                                    onClick={() => handleSort("createdAt")}
+                                >
+                                    <div className="flex items-center gap-1">
+                                        Date Created
+                                        <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "createdAt" ? "opacity-100 text-[#2D241E]" : ""}`} />
+                                    </div>
+                                </th>
+                            )}
                             
-                            <th className="p-4">Name & ID</th>
-                            <th className="p-4">Final Status</th>
+                            {visibleCols.nameId && <th className="p-4">Name & ID</th>}
+                            {visibleCols.status && <th className="p-4">Final Status</th>}
                             
-                            <th 
-                                className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
-                                onClick={() => handleSort("lastActionDate")}
-                            >
-                                <div className="flex items-center gap-1">
-                                    Closed On
-                                    <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "lastActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
-                                </div>
-                            </th>
+                            {visibleCols.closedOn && (
+                                <th 
+                                    className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
+                                    onClick={() => handleSort("lastActionDate")}
+                                >
+                                    <div className="flex items-center gap-1">
+                                        Closed On
+                                        <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "lastActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
+                                    </div>
+                                </th>
+                            )}
 
-                            <th className="p-4 w-1/3">Closing Remark</th>
+                            {visibleCols.remark && <th className="p-4 w-1/3">Closing Remark</th>}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-[#E8E0D5]">
                         {loading ? ( <tr><td colSpan={5} className="p-12 text-center text-[#8C7B6C]">Loading data...</td></tr> ) : 
-                        filteredList.length === 0 ? ( <tr><td colSpan={5} className="p-12 text-center text-[#8C7B6C]">No data found for this month.</td></tr> ) : (
+                        filteredList.length === 0 ? ( <tr><td colSpan={5} className="p-12 text-center text-[#8C7B6C]">No data found.</td></tr> ) : (
                             filteredList.map((enq) => (
                                 <tr key={enq.id} onClick={() => setSelectedEnquiry(enq)} className="hover:bg-[#F9F7F5] transition-colors group cursor-pointer">
-                                    <td className="p-4 text-sm font-medium text-[#4A4036]">{formatDate(enq.createdAt)}</td>
-                                    <td className="p-4">
-                                        <div className="font-bold text-[#2D241E]">{enq.name}</div>
-                                        <div className="text-xs font-mono text-[#8C7B6C] mt-0.5">{enq.enqId}</div>
-                                    </td>
-                                    <td className="p-4">{getStatusBadge(enq.status)}</td>
-                                    
-                                    <td className="p-4">
-                                        <div className="flex items-start gap-3">
-                                            <div className={`mt-0.5 shrink-0 ${enq.status === 'JOINED' ? 'text-[#5D7352]' : 'text-[#8C7B6C]'}`}>
-                                                {enq.status === 'JOINED' ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                    {visibleCols.created && <td className="p-4 text-sm font-medium text-[#4A4036]">{formatDate(enq.createdAt)}</td>}
+                                    {visibleCols.nameId && (
+                                        <td className="p-4">
+                                            <div className="font-bold text-[#2D241E]">{enq.name}</div>
+                                            <div className="text-xs font-mono text-[#8C7B6C] mt-0.5">{enq.enqId}</div>
+                                        </td>
+                                    )}
+                                    {visibleCols.status && <td className="p-4">{getStatusBadge(enq.status)}</td>}
+                                    {visibleCols.closedOn && (
+                                        <td className="p-4">
+                                            <div className="flex items-start gap-3">
+                                                <div className={`mt-0.5 shrink-0 ${enq.status === 'JOINED' ? 'text-[#5D7352]' : 'text-[#8C7B6C]'}`}>
+                                                    {enq.status === 'JOINED' ? <CheckCircle size={14} /> : <XCircle size={14} />}
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm font-bold text-[#2D241E]">{formatDate(enq.lastActionDate, "dd MMM yyyy")}</div>
+                                                    <div className="text-xs text-[#8C7B6C] mt-0.5">{enq.status === 'JOINED' ? "Conversion Date" : "Closure Date"}</div>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <div className="text-sm font-bold text-[#2D241E]">{formatDate(enq.lastActionDate, "dd MMM yyyy")}</div>
-                                                <div className="text-xs text-[#8C7B6C] mt-0.5">{enq.status === 'JOINED' ? "Conversion Date" : "Closure Date"}</div>
+                                        </td>
+                                    )}
+                                    {visibleCols.remark && (
+                                        <td className="p-4">
+                                            <div className="text-sm text-[#4A4036] italic line-clamp-2">
+                                                "{enq.lastRemark || "No closing remark"}"
                                             </div>
-                                        </div>
-                                    </td>
-
-                                    <td className="p-4">
-                                        <div className="text-sm text-[#4A4036] italic line-clamp-2">
-                                            "{enq.lastRemark || "No closing remark"}"
-                                        </div>
-                                    </td>
+                                        </td>
+                                    )}
                                 </tr>
                             ))
                         )}

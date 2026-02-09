@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import { 
   Search, 
@@ -9,14 +9,16 @@ import {
   Clock, 
   ArrowLeft,
   Mail,
-  CheckCircle,
   ArrowUpDown,
   Calendar as CalendarIcon,
-  ListFilter
+  ListFilter,
+  Eye,
+  Check,
+  ChevronDown 
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, getDocs, orderBy, where, Timestamp } from "firebase/firestore";
-import { format, startOfMonth, endOfMonth, differenceInDays } from "date-fns";
+import { format, startOfMonth, endOfMonth, differenceInDays, parse } from "date-fns";
 import { useAuth } from "@/lib/useAuth"; 
 
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
@@ -37,12 +39,12 @@ type Enquiry = {
   linkSent?: boolean;
 };
 
-// --- Config ---
+// --- Config (Updated Colors) ---
 const STATUS_CONFIG = [
-    { label: "Follow Up", value: "CALL_AGAIN", color: "bg-[#F5F0EB] text-[#8C7B6C] border-[#E8E0D5]" },
-    { label: "Ready for Demo", value: "READY_DEMO", color: "bg-[#EBF3F6] text-[#4F6D7A] border-[#C5D6DE]" },
-    { label: "Demo Taken", value: "DEMO_TAKEN", color: "bg-[#F4EFF3] text-[#7A6273] border-[#DCCFD9]" },
-    { label: "Ready for Admission", value: "READY_ADMISSION", color: "bg-[#EFF5EC] text-[#5D7352] border-[#CAD9C3]" },
+    { label: "Follow Up", value: "CALL_AGAIN", color: "bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]" },
+    { label: "Ready for Demo", value: "READY_DEMO", color: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]" },
+    { label: "Demo Taken", value: "DEMO_TAKEN", color: "bg-[#F5F3FF] text-[#7C3AED] border-[#DDD6FE]" },
+    { label: "Ready for Admission", value: "READY_ADMISSION", color: "bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]" },
 ];
 
 export default function EnquiryListPage() {
@@ -62,6 +64,43 @@ export default function EnquiryListPage() {
   // Date Filter State
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [isAllTime, setIsAllTime] = useState(false); 
+
+  // Column Visibility State
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const columnMenuRef = useRef<HTMLDivElement>(null);
+  const [visibleCols, setVisibleCols] = useState({
+      created: true,
+      age: true,
+      nameId: true,
+      status: true,
+      lastAction: true,
+      nextAction: true
+  });
+
+  // Status Filter Menu State
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const statusMenuRef = useRef<HTMLDivElement>(null);
+
+  // Date Filter Menu State
+  const [showDateMenu, setShowDateMenu] = useState(false);
+  const dateMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdowns when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+        if (columnMenuRef.current && !columnMenuRef.current.contains(event.target as Node)) {
+            setShowColumnMenu(false);
+        }
+        if (statusMenuRef.current && !statusMenuRef.current.contains(event.target as Node)) {
+            setShowStatusMenu(false);
+        }
+        if (dateMenuRef.current && !dateMenuRef.current.contains(event.target as Node)) {
+            setShowDateMenu(false);
+        }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Fetch Data 
   useEffect(() => {
@@ -116,7 +155,6 @@ export default function EnquiryListPage() {
       return <span className={`px-2 py-1 rounded text-[10px] font-bold border ${config ? config.color : "bg-gray-100"}`}>{config ? config.label : status}</span>;
   };
 
-  // Sorting Handler
   const handleSort = (field: "createdAt" | "lastActionDate" | "nextActionDate") => {
       if (sortBy === field) {
           setSortOrder(sortOrder === "asc" ? "desc" : "asc"); 
@@ -145,6 +183,11 @@ export default function EnquiryListPage() {
       return result;
   }, [enquiries, activeFilter, searchTerm, sortBy, sortOrder]);
 
+  const activeStatusConfig = STATUS_CONFIG.find(s => s.value === activeFilter);
+  const filterButtonStyle = activeFilter === "ALL" 
+      ? "bg-[#2D241E] text-white border-[#2D241E]" 
+      : `${activeStatusConfig?.color} ring-1 ring-black/5`;
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
         <div className="space-y-4">
@@ -156,9 +199,8 @@ export default function EnquiryListPage() {
                 <h1 className="text-2xl font-serif font-bold text-[#2D241E]">Active Enquiries</h1>
             </div>
             
-            {/* Controls Row */}
-            <div className="flex flex-col md:flex-row gap-4">
-                {/* Search */}
+            {/* Row 1: Search & Visibility Toggle */}
+            <div className="flex w-full gap-2">
                 <div className="relative flex-1">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8C7B6C]" size={20} />
                     <input 
@@ -169,38 +211,118 @@ export default function EnquiryListPage() {
                     />
                 </div>
 
-                {/* Date Controls */}
-                <div className="flex items-center gap-3 bg-white p-1 rounded-xl border border-[#E8E0D5] shadow-sm">
-                    {/* Month Picker */}
-                    <div className="relative">
-                        <div className={`absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none ${isAllTime ? "text-gray-300" : "text-[#8C7B6C]"}`}>
-                            <CalendarIcon size={18} />
-                        </div>
-                        <input 
-                            type="month" 
-                            disabled={isAllTime}
-                            value={selectedMonth}
-                            onChange={(e) => setSelectedMonth(e.target.value)}
-                            className={`pl-12 pr-4 py-2 bg-transparent outline-none font-bold cursor-pointer rounded-lg transition-colors ${isAllTime ? "text-gray-300 cursor-not-allowed" : "text-[#4A4036] hover:bg-[#F5F0EB]"}`}
-                        />
-                    </div>
-
-                    {/* All Time Toggle */}
+                <div className="relative" ref={columnMenuRef}>
                     <button 
-                        onClick={() => setIsAllTime(!isAllTime)}
-                        className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all ${isAllTime ? "bg-[#2D241E] text-white shadow-md" : "bg-[#F5F0EB] text-[#8C7B6C] hover:bg-[#E8E0D5]"}`}
+                        onClick={() => setShowColumnMenu(!showColumnMenu)}
+                        className="h-full px-3.5 bg-white border border-[#E8E0D5] rounded-xl hover:bg-[#F5F0EB] transition-colors text-[#4A4036] shadow-sm flex items-center justify-center"
                     >
-                        <ListFilter size={16} /> All Time
+                        <Eye size={20} />
                     </button>
+                    
+                    {showColumnMenu && (
+                        <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            <div className="text-xs font-bold text-[#8C7B6C] px-2 py-1 uppercase tracking-wider mb-1">Show Columns</div>
+                            <div className="space-y-1">
+                                {[
+                                    { key: "created", label: "Created Date" },
+                                    { key: "age", label: "Age" },
+                                    { key: "nameId", label: "Name & ID" },
+                                    { key: "status", label: "Status" },
+                                    { key: "lastAction", label: "Last Action & Remark" },
+                                    { key: "nextAction", label: "Next Action & Date" },
+                                ].map((col) => (
+                                    <button
+                                        key={col.key}
+                                        onClick={() => setVisibleCols(prev => ({ ...prev, [col.key]: !prev[col.key as keyof typeof visibleCols] }))}
+                                        className="w-full flex items-center justify-between px-2 py-2 text-sm rounded-lg hover:bg-[#F5F0EB] text-[#4A4036] transition-colors"
+                                    >
+                                        <span>{col.label}</span>
+                                        {visibleCols[col.key as keyof typeof visibleCols] && (
+                                            <Check size={16} className="text-[#15803D]" />
+                                        )}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
 
-            {/* Filters */}
-            <div className="flex flex-wrap gap-2">
-                <button onClick={() => setActiveFilter("ALL")} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${activeFilter === "ALL" ? "bg-[#2D241E] text-white border-[#2D241E]" : "bg-white text-[#8C7B6C] border-[#E8E0D5] hover:bg-[#F5F0EB]"}`}>All Active</button>
-                {STATUS_CONFIG.map(status => (
-                    <button key={status.value} onClick={() => setActiveFilter(status.value)} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all border ${activeFilter === status.value ? "ring-1 ring-black/10 " + status.color : "bg-white text-[#8C7B6C] border-[#E8E0D5] hover:bg-[#F5F0EB]"}`}>{status.label}</button>
-                ))}
+            {/* Row 2: Dropdown Filters */}
+            <div className="flex flex-wrap gap-3">
+                {/* Status Filter Dropdown */}
+                <div className="relative inline-block text-left" ref={statusMenuRef}>
+                    <button 
+                        onClick={() => setShowStatusMenu(!showStatusMenu)}
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition-all border shadow-sm ${filterButtonStyle}`}
+                    >
+                        <span>{activeFilter === "ALL" ? "All Active" : activeStatusConfig?.label}</span>
+                        <ChevronDown size={16} />
+                    </button>
+
+                    {showStatusMenu && (
+                        <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            <button 
+                                onClick={() => { setActiveFilter("ALL"); setShowStatusMenu(false); }}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${activeFilter === "ALL" ? "bg-[#2D241E] text-white" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                            >
+                                All Active
+                                {activeFilter === "ALL" && <Check size={14} />}
+                            </button>
+                            
+                            {STATUS_CONFIG.map(status => (
+                                <button 
+                                    key={status.value} 
+                                    onClick={() => { setActiveFilter(status.value); setShowStatusMenu(false); }}
+                                    className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${activeFilter === status.value ? status.color + " ring-1 ring-black/5" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                                >
+                                    {status.label}
+                                    {activeFilter === status.value && <Check size={14} />}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+
+                {/* Date Filter Dropdown */}
+                <div className="relative inline-block text-left" ref={dateMenuRef}>
+                    <button 
+                        onClick={() => setShowDateMenu(!showDateMenu)}
+                        className={`flex items-center gap-2 px-4 py-2.5 bg-white border border-[#E8E0D5] rounded-lg text-sm font-bold transition-all shadow-sm text-[#4A4036] hover:bg-[#F5F0EB]`}
+                    >
+                        <CalendarIcon size={16} className="text-[#8C7B6C]" />
+                        <span>{isAllTime ? "All Time" : format(parse(selectedMonth, "yyyy-MM", new Date()), "MMMM yyyy")}</span>
+                        <ChevronDown size={16} className="text-[#8C7B6C]" />
+                    </button>
+
+                    {showDateMenu && (
+                        <div className="absolute left-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-[#E8E0D5] z-50 p-2 animate-in fade-in zoom-in-95 duration-200">
+                            <button 
+                                onClick={() => { setIsAllTime(true); setShowDateMenu(false); }}
+                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-between items-center mb-1 ${isAllTime ? "bg-[#2D241E] text-white" : "hover:bg-[#F5F0EB] text-[#4A4036]"}`}
+                            >
+                                <div className="flex items-center gap-2">
+                                    <ListFilter size={16} /> All Time
+                                </div>
+                                {isAllTime && <Check size={14} />}
+                            </button>
+                            
+                            <div className="px-3 py-2">
+                                <div className="text-[10px] font-bold text-[#8C7B6C] uppercase tracking-wider mb-2">Select Specific Month</div>
+                                <input 
+                                    type="month" 
+                                    value={selectedMonth}
+                                    onChange={(e) => {
+                                        setSelectedMonth(e.target.value);
+                                        setIsAllTime(false);
+                                        setShowDateMenu(false);
+                                    }}
+                                    className="w-full px-3 py-2 bg-[#F5F0EB] border border-[#E8E0D5] rounded-lg text-sm font-bold text-[#4A4036] outline-none focus:ring-2 focus:ring-[#C5A880]"
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
 
@@ -210,19 +332,21 @@ export default function EnquiryListPage() {
                 <table className="w-full text-left border-collapse">
                     <thead>
                         <tr className="bg-[#F5F0EB] border-b border-[#E8E0D5] text-xs uppercase tracking-wider text-[#8C7B6C] font-bold select-none">
-                            <th 
-                                className="p-4 w-32 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
-                                onClick={() => handleSort("createdAt")}
-                            >
-                                <div className="flex items-center gap-1">
-                                    Created
-                                    <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "createdAt" ? "opacity-100 text-[#2D241E]" : ""}`} />
-                                </div>
-                            </th>
+                            {visibleCols.created && (
+                                <th 
+                                    className="p-4 w-32 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
+                                    onClick={() => handleSort("createdAt")}
+                                >
+                                    <div className="flex items-center gap-1">
+                                        Created
+                                        <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "createdAt" ? "opacity-100 text-[#2D241E]" : ""}`} />
+                                    </div>
+                                </th>
+                            )}
 
-                            <th className="p-4 w-24 text-center">Age</th>
-                            <th className="p-4">Name & ID</th>
-                            <th className="p-4">Status</th>
+                            {visibleCols.age && <th className="p-4 w-24 text-center">Age</th>}
+                            {visibleCols.nameId && <th className="p-4">Name & ID</th>}
+                            {visibleCols.status && <th className="p-4">Status</th>}
                             
                             {activeFilter === "READY_DEMO" && <th className="p-4 text-center">Link Sent?</th>}
                             
@@ -230,25 +354,29 @@ export default function EnquiryListPage() {
                                 <th className="p-4 w-1/4">Invitation Date</th>
                             ) : (
                                 <>
-                                    <th 
-                                        className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
-                                        onClick={() => handleSort("lastActionDate")}
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            Last Action
-                                            <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "lastActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
-                                        </div>
-                                    </th>
+                                    {visibleCols.lastAction && (
+                                        <th 
+                                            className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
+                                            onClick={() => handleSort("lastActionDate")}
+                                        >
+                                            <div className="flex items-center gap-1">
+                                                Last Action
+                                                <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "lastActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
+                                            </div>
+                                        </th>
+                                    )}
 
-                                    <th 
-                                        className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
-                                        onClick={() => handleSort("nextActionDate")}
-                                    >
-                                        <div className="flex items-center gap-1">
-                                            Next Action
-                                            <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "nextActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
-                                        </div>
-                                    </th>
+                                    {visibleCols.nextAction && (
+                                        <th 
+                                            className="p-4 w-1/4 cursor-pointer hover:bg-[#E8E0D5] transition-colors group"
+                                            onClick={() => handleSort("nextActionDate")}
+                                        >
+                                            <div className="flex items-center gap-1">
+                                                Next Action
+                                                <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 transition-opacity ${sortBy === "nextActionDate" ? "opacity-100 text-[#2D241E]" : ""}`} />
+                                            </div>
+                                        </th>
+                                    )}
                                 </>
                             )}
                         </tr>
@@ -258,28 +386,32 @@ export default function EnquiryListPage() {
                         filteredList.length === 0 ? ( <tr><td colSpan={7} className="p-12 text-center text-[#8C7B6C]">No active enquiries found.</td></tr> ) : (
                             filteredList.map((enq) => (
                                 <tr key={enq.id} onClick={() => setSelectedEnquiry(enq)} className="hover:bg-[#F9F7F5] transition-colors group cursor-pointer">
-                                    <td className="p-4 text-sm font-medium text-[#4A4036]">{formatDate(enq.createdAt)}</td>
-                                    
-                                    <td className="p-4 text-center">
-                                        <span className="bg-[#F5F0EB] text-[#8C7B6C] px-2 py-1 rounded text-xs font-bold border border-[#E8E0D5]">
-                                            {getDaysOld(enq.createdAt)}d
-                                        </span>
-                                    </td>
-
-                                    <td className="p-4">
-                                        <div className="font-bold text-[#2D241E]">{enq.name}</div>
-                                        <div className="text-xs font-mono text-[#8C7B6C] mt-0.5">{enq.enqId}</div>
-                                    </td>
-                                    <td className="p-4">{getStatusBadge(enq.status)}</td>
-                                    
+                                    {visibleCols.created && (
+                                        <td className="p-4 text-sm font-medium text-[#4A4036]">{formatDate(enq.createdAt)}</td>
+                                    )}
+                                    {visibleCols.age && (
+                                        <td className="p-4 text-center">
+                                            <span className="bg-[#F5F0EB] text-[#8C7B6C] px-2 py-1 rounded text-xs font-bold border border-[#E8E0D5]">
+                                                {getDaysOld(enq.createdAt)}d
+                                            </span>
+                                        </td>
+                                    )}
+                                    {visibleCols.nameId && (
+                                        <td className="p-4">
+                                            <div className="font-bold text-[#2D241E]">{enq.name}</div>
+                                            <div className="text-xs font-mono text-[#8C7B6C] mt-0.5">{enq.enqId}</div>
+                                        </td>
+                                    )}
+                                    {visibleCols.status && (
+                                        <td className="p-4">{getStatusBadge(enq.status)}</td>
+                                    )}
                                     {activeFilter === "READY_DEMO" && (
                                         <td className="p-4 text-center">{enq.linkSent ? <span className="text-[#5D7352] text-xs font-bold">Yes</span> : <span className="text-[#D96C6C] text-xs font-bold">No</span>}</td>
                                     )}
-
                                     {activeFilter === "READY_ADMISSION" ? (
                                         <td className="p-4">
                                             <div className="flex items-center gap-3">
-                                                <div className="p-2 bg-[#EFF5EC] text-[#5D7352] rounded-full">
+                                                <div className="p-2 bg-[#F0FDF4] text-[#15803D] rounded-full">
                                                     <Mail size={16} />
                                                 </div>
                                                 <div>
@@ -290,30 +422,34 @@ export default function EnquiryListPage() {
                                         </td>
                                     ) : (
                                         <>
-                                            <td className="p-4">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="mt-0.5 text-[#C5A880] shrink-0">{enq.lastAction === "Called" ? <Phone size={14} /> : <MessageCircle size={14} />}</div>
-                                                    <div>
-                                                        <div className="text-sm font-bold text-[#2D241E]">{enq.lastAction}<span className="text-[#8C7B6C] font-normal ml-2 text-xs">{formatDate(enq.lastActionDate)}</span></div>
-                                                        <div className="text-xs text-[#8C7B6C] mt-0.5 line-clamp-1 italic">"{enq.lastRemark || "No remark"}"</div>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="p-4">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="mt-0.5 shrink-0 text-[#4A4036]">
-                                                        <Clock size={14} />
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-sm font-bold text-[#2D241E]">
-                                                            {enq.nextAction}
-                                                        </div>
-                                                        <div className="text-xs font-medium mt-0.5 text-[#4A4036]">
-                                                            {formatDate(enq.nextActionDate, "PPP")}
+                                            {visibleCols.lastAction && (
+                                                <td className="p-4">
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="mt-0.5 text-[#C5A880] shrink-0">{enq.lastAction === "Called" ? <Phone size={14} /> : <MessageCircle size={14} />}</div>
+                                                        <div>
+                                                            <div className="text-sm font-bold text-[#2D241E]">{enq.lastAction}<span className="text-[#8C7B6C] font-normal ml-2 text-xs">{formatDate(enq.lastActionDate)}</span></div>
+                                                            <div className="text-xs text-[#8C7B6C] mt-0.5 line-clamp-1 italic">"{enq.lastRemark || "No remark"}"</div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            </td>
+                                                </td>
+                                            )}
+                                            {visibleCols.nextAction && (
+                                                <td className="p-4">
+                                                    <div className="flex items-start gap-3">
+                                                        <div className="mt-0.5 shrink-0 text-[#4A4036]">
+                                                            <Clock size={14} />
+                                                        </div>
+                                                        <div>
+                                                            <div className="text-sm font-bold text-[#2D241E]">
+                                                                {enq.nextAction}
+                                                            </div>
+                                                            <div className="text-xs font-medium mt-0.5 text-[#4A4036]">
+                                                                {formatDate(enq.nextActionDate, "PPP")}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            )}
                                         </>
                                     )}
                                 </tr>
