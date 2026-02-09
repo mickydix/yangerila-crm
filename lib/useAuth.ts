@@ -12,6 +12,9 @@ export type AppUser = {
   srmId?: string;
 };
 
+// 👇 List of pages where we DOES NOT check for login
+const PUBLIC_PATHS = ["/login", "/reset-password", "/setup"];
+
 export function useAuth() {
   const [user, setUser] = useState<User | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
@@ -24,6 +27,7 @@ export function useAuth() {
       if (firebaseUser) {
         setUser(firebaseUser);
         try {
+          // Fetch the Role and ID from your database
           const userDoc = await getDoc(doc(db, "users", firebaseUser.uid));
           if (userDoc.exists()) {
             const userData = userDoc.data() as AppUser;
@@ -33,10 +37,13 @@ export function useAuth() {
           console.error("Error fetching user data:", error);
         }
       } else {
+        // User is logged out
         setUser(null);
         setAppUser(null);
-        if (pathname !== "/login") {
-          router.push("/login");
+
+        // 👇 FIX: Only redirect if we are NOT on a public page
+        if (!PUBLIC_PATHS.includes(pathname)) {
+            router.push("/login");
         }
       }
       setLoading(false);

@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
+// 👇 CHANGED: Added setPersistence and browserLocalPersistence
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  sendPasswordResetEmail, 
+  setPersistence, 
+  browserLocalPersistence 
+} from "firebase/auth";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
@@ -42,6 +49,9 @@ export default function LoginPage() {
            setLoading(false);
            return;
         }
+
+        // 👇 CHANGED: This line tells the browser "Remember this user even after they close the tab"
+        await setPersistence(auth, browserLocalPersistence);
 
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const uid = cred.user.uid;
