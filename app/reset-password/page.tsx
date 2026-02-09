@@ -2,6 +2,8 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+// 👇 THIS IS THE MISSING LINE THAT FIXES THE CRASH
+import "@/lib/firebase"; 
 import { getAuth, verifyPasswordResetCode, confirmPasswordReset } from "firebase/auth";
 import { Eye, EyeOff, CheckCircle2, AlertCircle, Lock } from "lucide-react";
 
@@ -9,7 +11,7 @@ function ResetPasswordContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const oobCode = searchParams.get("oobCode"); 
-  const auth = getAuth();
+  const auth = getAuth(); // Now this will work because we imported the line above
 
   // State
   const [email, setEmail] = useState("");
