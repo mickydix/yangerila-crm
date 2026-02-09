@@ -56,8 +56,11 @@ export default function CardsPage() {
             collection(db, "enquiries"), 
             where("srmId", "==", appUser.srmId),
             where("status", "in", ["CALL_AGAIN", "READY_DEMO", "DEMO_TAKEN", "READY_ADMISSION"]),
+            where("status", "!=", "JOINED"), 
+            orderBy("status"), 
             orderBy("nextActionDate", "asc")
         );
+        
         const snap = await getDocs(q);
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() } as Enquiry));
         setAllEnquiries(list);
@@ -81,9 +84,17 @@ export default function CardsPage() {
 
       allEnquiries.forEach(enq => {
           const lastActionDate = enq.lastActionDate?.toDate ? enq.lastActionDate.toDate() : null;
-          if (lastActionDate && isToday(lastActionDate)) return; 
-
           const date = enq.nextActionDate?.toDate ? enq.nextActionDate.toDate() : null;
+
+          // --- LOGIC: "Snooze" Persistence ---
+          // This ensures that when the page RELOADS, the card comes back if it's due today.
+          if (lastActionDate && isToday(lastActionDate)) {
+             // If next action is NOT today, hide it (it was pushed to future)
+             if (!date || !isToday(date)) {
+                 return;
+             }
+             // If next action IS today, we let it pass through to the buckets below
+          }
           
           if (enq.status === "READY_DEMO") {
               if (date && (isBefore(date, todayStart) || isToday(date) || isTomorrow(date))) {
@@ -155,6 +166,10 @@ export default function CardsPage() {
 
   // --- 3. Interaction Handlers ---
   const handleUpdate = (updatedEnquiry: Enquiry) => {
+      // --- CHANGED LOGIC HERE ---
+      // We remove the card from the CURRENT view immediately to give visual feedback.
+      // If the user reloads the page, the 'useMemo' logic above will decide 
+      // if it should reappear (based on if Next Action is Today).
       setAllEnquiries(prev => prev.filter(e => e.id !== updatedEnquiry.id));
       setSkippedIds(prev => prev.filter(id => id !== updatedEnquiry.id));
   };
