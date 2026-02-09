@@ -2,15 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function LoginPage() {
   const router = useRouter();
   
-  // UI State
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  // UI State (Added "reset" mode)
+  const [mode, setMode] = useState<"login" | "signup" | "reset">("login");
   const [loading, setLoading] = useState(false);
   
   // Form State
@@ -21,15 +21,28 @@ export default function LoginPage() {
   const handleAction = async () => {
     setLoading(true);
     try {
+      const auth = getAuth();
+
+      // --- LOGIC: RESET PASSWORD ---
+      if (mode === "reset") {
+        if (!email) {
+            alert("Please enter your email address.");
+            setLoading(false);
+            return;
+        }
+        await sendPasswordResetEmail(auth, email);
+        alert(`Reset link sent to ${email}. Check your inbox!`);
+        setMode("login"); // Go back to login screen
+      }
+
       // --- LOGIC: LOG IN ---
-      if (mode === "login") {
+      else if (mode === "login") {
         if (!email || !password) {
            alert("Please enter email and password.");
            setLoading(false);
            return;
         }
 
-        const auth = getAuth();
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const uid = cred.user.uid;
 
@@ -58,7 +71,6 @@ export default function LoginPage() {
             return;
         }
 
-        // 1. Check if SRM exists with this Email + ID + Status "NEW"
         const q = query(
             collection(db, "srms"),
             where("email", "==", email),
@@ -74,17 +86,20 @@ export default function LoginPage() {
             return;
         }
 
-        // 2. Found! Send to Setup Page
         const srmData = snap.docs[0].data();
         const srmDocId = snap.docs[0].id;
         
-        // We pass the data via URL to the setup page
         router.push(`/setup?email=${encodeURIComponent(email)}&id=${srmDocId}&name=${encodeURIComponent(srmData.name)}`);
       }
 
     } catch (error: any) {
       console.error(error);
-      alert(error.message || "Action failed");
+      // Firebase specific error handling for better UX
+      if (error.code === 'auth/user-not-found') {
+        alert("No user found with this email.");
+      } else {
+        alert(error.message || "Action failed");
+      }
     } finally {
       setLoading(false);
     }
@@ -104,32 +119,36 @@ export default function LoginPage() {
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Yangerila</h1>
-          <p className="text-xs uppercase tracking-widest text-gray-500 mt-1 font-medium">CRM Portal</p>
+          <p className="text-xs uppercase tracking-widest text-gray-500 mt-1 font-medium">
+            {mode === "reset" ? "Reset Password" : "CRM Portal"}
+          </p>
         </div>
 
-        {/* Toggle Switch */}
-        <div className="flex bg-gray-100/80 p-1 rounded-xl mb-6 border border-gray-200">
-           <button
-             onClick={() => setMode("login")}
-             className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-               mode === "login" 
-                 ? "bg-white text-black shadow-sm ring-1 ring-black/5" 
-                 : "text-gray-400 hover:text-gray-600"
-             }`}
-           >
-             Log In
-           </button>
-           <button
-             onClick={() => setMode("signup")}
-             className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-               mode === "signup" 
-                 ? "bg-white text-black shadow-sm ring-1 ring-black/5" 
-                 : "text-gray-400 hover:text-gray-600"
-             }`}
-           >
-             Verify Account
-           </button>
-        </div>
+        {/* Toggle Switch (Hidden in Reset Mode) */}
+        {mode !== "reset" && (
+            <div className="flex bg-gray-100/80 p-1 rounded-xl mb-6 border border-gray-200">
+            <button
+                onClick={() => setMode("login")}
+                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                mode === "login" 
+                    ? "bg-white text-black shadow-sm ring-1 ring-black/5" 
+                    : "text-gray-400 hover:text-gray-600"
+                }`}
+            >
+                Log In
+            </button>
+            <button
+                onClick={() => setMode("signup")}
+                className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
+                mode === "signup" 
+                    ? "bg-white text-black shadow-sm ring-1 ring-black/5" 
+                    : "text-gray-400 hover:text-gray-600"
+                }`}
+            >
+                Verify Account
+            </button>
+            </div>
+        )}
 
         {/* Inputs */}
         <div className="space-y-4">
@@ -143,7 +162,7 @@ export default function LoginPage() {
               />
           </div>
 
-          {mode === "login" ? (
+          {mode === "login" && (
              <div className="animate-in slide-in-from-top-2 fade-in duration-300">
                 <input
                     type="password"
@@ -152,8 +171,19 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-black focus:bg-white transition-all placeholder:text-gray-400"
                 />
+                {/* FORGOT PASSWORD LINK */}
+                <div className="text-right mt-2">
+                    <button 
+                        onClick={() => setMode("reset")} 
+                        className="text-xs font-bold text-gray-400 hover:text-black transition-colors"
+                    >
+                        Forgot Password?
+                    </button>
+                </div>
              </div>
-          ) : (
+          )}
+
+          {mode === "signup" && (
              <div className="animate-in slide-in-from-top-2 fade-in duration-300">
                 <input
                     placeholder="YCS ID (e.g. SRM-01)"
@@ -169,14 +199,27 @@ export default function LoginPage() {
         <button
           onClick={handleAction}
           disabled={loading}
-          className="w-full mt-8 bg-black text-white rounded-xl py-3.5 text-sm font-bold shadow-lg hover:bg-gray-800 hover:shadow-xl active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full mt-6 bg-black text-white rounded-xl py-3.5 text-sm font-bold shadow-lg hover:bg-gray-800 hover:shadow-xl active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? "Processing..." : (mode === "login" ? "Sign In" : "Verify & Continue")}
+          {loading 
+            ? "Processing..." 
+            : (mode === "login" ? "Sign In" : mode === "signup" ? "Verify & Continue" : "Send Reset Link")
+          }
         </button>
+
+        {/* Back Button for Reset Mode */}
+        {mode === "reset" && (
+            <button 
+                onClick={() => setMode("login")}
+                className="w-full mt-3 text-sm font-bold text-gray-500 hover:text-black py-2"
+            >
+                Back to Login
+            </button>
+        )}
 
         <div className="mt-6 text-center">
             <span className="text-xs text-gray-400 font-medium">
-                {mode === "login" ? "Authorized Personnel Only" : "Account activation requires Admin approval"}
+                {mode === "login" ? "Authorized Personnel Only" : mode === "signup" ? "Account activation requires Admin approval" : "Enter your email to receive a link"}
             </span>
         </div>
 
