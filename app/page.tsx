@@ -9,30 +9,34 @@ export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (loading) return; // Wait for auth to finish checking
+    if (loading) return; 
 
     if (appUser) {
-      // 🚦 TRAFFIC CONTROLLER LOGIC
-      if (appUser.role === "ADMIN") {
-        router.replace("/admin"); // Send Micky to Admin
-      } else if (appUser.role === "SRM") {
-        router.replace("/srm");   // Send SRMs to SRM
+      // Convert role to uppercase to prevent case-sensitive bugs
+      const role = appUser.role ? appUser.role.toUpperCase() : "";
+
+      if (role === "ADMIN") {
+        router.replace("/admin");
+      } else if (role === "SRM") {
+        router.replace("/srm");
       } else {
-        // Fallback for weird roles
+        // Only redirect to login if the role is TRULY unrecognizable
+        console.log("Unknown Role detected:", role); 
         router.replace("/login"); 
       }
     } else {
-      // Not logged in? Go to login
       router.replace("/login");
     }
   }, [appUser, loading, router]);
 
-  // While we decide where to send them, show a loading screen
+  // Loading Screen
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="min-h-screen flex items-center justify-center bg-[#FDFDFD]">
       <div className="flex flex-col items-center gap-4">
-        <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-gray-500 font-medium animate-pulse">Routing...</p>
+        <div className="w-12 h-12 border-4 border-[#C5A880] border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-[#8C7B6C] font-serif font-bold animate-pulse">
+            Yangerila CRM
+        </p>
       </div>
     </div>
   );

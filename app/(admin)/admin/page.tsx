@@ -21,14 +21,16 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (loading) return;
 
-    // 1. If not logged in, kick to login
     if (!appUser) {
       router.replace("/login");
       return;
     }
 
-    // 2. If logged in as SRM, kick to SRM Dashboard
-    if (appUser.role === "SRM") {
+    // Convert to uppercase for safety
+    const role = appUser.role ? appUser.role.toUpperCase() : "";
+
+    // If logged in as SRM, kick to SRM Dashboard
+    if (role === "SRM") {
       router.replace("/srm");
       return;
     }
@@ -64,7 +66,7 @@ export default function AdminDashboardPage() {
   ];
 
   // Prevent flash of content
-  if (loading || !appUser || appUser.role === "SRM") {
+  if (loading || !appUser) {
       return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-[#8C7B6C] animate-pulse">Loading Admin...</div>;
   }
 

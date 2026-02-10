@@ -69,6 +69,7 @@ export default function SRMDashboard() {
       return;
     }
 
+    const role = appUser.role ? appUser.role.toUpperCase() : "";
     // 2. If logged in as ADMIN, kick to Admin Dashboard
     if (appUser.role === "ADMIN") {
       router.replace("/admin"); 
