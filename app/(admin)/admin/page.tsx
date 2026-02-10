@@ -1,15 +1,43 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { 
   Users, 
   MessageCircle,
-  ArrowRight
+  ArrowRight,
+  Database,
+  LogOut
 } from "lucide-react";
 import { useAuth } from "@/lib/useAuth";
+import { useRouter } from "next/navigation";
+import { getAuth, signOut } from "firebase/auth";
 
 export default function AdminDashboardPage() {
-  const { appUser } = useAuth();
+  const { appUser, loading } = useAuth();
+  const router = useRouter();
+
+  // --- 🛡️ THE BOUNCER (Security Check) ---
+  useEffect(() => {
+    if (loading) return;
+
+    // 1. If not logged in, kick to login
+    if (!appUser) {
+      router.replace("/login");
+      return;
+    }
+
+    // 2. If logged in as SRM, kick to SRM Dashboard
+    if (appUser.role === "SRM") {
+      router.replace("/srm");
+      return;
+    }
+  }, [appUser, loading, router]);
+
+  const handleLogout = async () => {
+      await signOut(getAuth());
+      router.push("/login");
+  };
 
   const shortcuts = [
     { 
@@ -20,26 +48,46 @@ export default function AdminDashboardPage() {
       desc: "View all leads & conversations" 
     },
     { 
+      name: "Archived Data", 
+      href: "/admin/data", 
+      icon: Database, 
+      color: "bg-[#8C7B6C]", 
+      desc: "Joined & Closed records" 
+    },
+    { 
       name: "SRM Team", 
       href: "/admin/srms", 
       icon: Users, 
-      color: "bg-[#8C7B6C]", 
+      color: "bg-[#2D241E]", 
       desc: "Manage staff & performance" 
     },
   ];
 
+  // Prevent flash of content
+  if (loading || !appUser || appUser.role === "SRM") {
+      return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-[#8C7B6C] animate-pulse">Loading Admin...</div>;
+  }
+
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto p-4">
       
-      {/* Header */}
-      <div className="mb-12 mt-4">
-        <h1 className="text-4xl font-serif font-bold text-[#2D241E]">
-            Hello, {appUser?.name?.split(" ")[0] || "Admin"}
-        </h1>
-        <p className="text-[#8C7B6C] mt-2 text-lg">Here is your overview for today.</p>
+      {/* Header with Logout */}
+      <div className="mb-12 mt-4 flex justify-between items-start">
+        <div>
+            <h1 className="text-4xl font-serif font-bold text-[#2D241E]">
+                Hello, {appUser?.name?.split(" ")[0] || "Admin"}
+            </h1>
+            <p className="text-[#8C7B6C] mt-2 text-lg">Here is your overview for today.</p>
+        </div>
+        <button 
+            onClick={handleLogout}
+            className="flex items-center gap-2 text-[#8C7B6C] hover:text-[#D96C6C] transition-colors font-bold text-xs uppercase tracking-wider mt-2"
+        >
+            <LogOut size={16} /> Sign Out
+        </button>
       </div>
 
-      {/* Quick Stats Row (Placeholders for now) */}
+      {/* Quick Stats Row (Placeholders) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
         <div className="bg-[#FDFDFD] p-8 rounded-3xl shadow-sm border border-[#E8E0D5] flex flex-col justify-between h-40">
             <div className="text-xs font-bold text-[#8C7B6C] uppercase tracking-wider">Total Enquiries</div>
@@ -56,7 +104,7 @@ export default function AdminDashboardPage() {
       </h2>
       
       {/* The Icon Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {shortcuts.map((item) => (
           <Link 
             key={item.name} 

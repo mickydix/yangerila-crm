@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   Plus, 
@@ -38,7 +38,7 @@ const STATUSES = [
 ];
 
 export default function SRMDashboard() {
-  const { appUser } = useAuth();
+  const { appUser, loading } = useAuth(); // Added loading
   const router = useRouter();
   
   // UI State
@@ -58,6 +58,23 @@ export default function SRMDashboard() {
       nextActionDate: ""
   };
   const [form, setForm] = useState(initialForm);
+
+  // --- 🛡️ THE BOUNCER (Security Check) ---
+  useEffect(() => {
+    if (loading) return;
+
+    // 1. If not logged in, kick to login
+    if (!appUser) {
+      router.replace("/login");
+      return;
+    }
+
+    // 2. If logged in as ADMIN, kick to Admin Dashboard
+    if (appUser.role === "ADMIN") {
+      router.replace("/admin"); 
+      return;
+    }
+  }, [appUser, loading, router]);
 
   // --- Handlers ---
 
@@ -153,6 +170,11 @@ export default function SRMDashboard() {
       { label: "Enquiries", icon: FileText, href: "/srm/enquiries" },
       { label: "Data", icon: Database, href: "/srm/data" },
   ];
+
+  // Prevent flash of content while checking role
+  if (loading || !appUser || appUser.role === "ADMIN") {
+      return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-[#8C7B6C] animate-pulse">Loading...</div>;
+  }
 
   return (
     <div className="h-full flex flex-col p-6 max-w-5xl mx-auto">
