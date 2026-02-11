@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Phone, 
   MessageCircle, 
@@ -12,7 +12,8 @@ import {
   Mail,
   CheckCircle,
   CalendarDays,
-  BarChart3
+  BarChart3,
+  RefreshCcw
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
@@ -25,7 +26,8 @@ import {
     writeBatch,
     where,
     getCountFromServer,
-    addDoc
+    addDoc,
+    deleteDoc
 } from "firebase/firestore";
 import { format, differenceInDays } from "date-fns";
 import { useAuth } from "@/lib/useAuth";
@@ -100,6 +102,19 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
     const [formNextAction, setFormNextAction] = useState("Call back");
     const [formEmail, setFormEmail] = useState("");
 
+    // --- 🛡️ SAME AS BEFORE LOGIC ---
+    const [useSameAsBefore, setUseSameAsBefore] = useState(false);
+
+    useEffect(() => {
+        if (useSameAsBefore) {
+            setFormNextAction(enquiry.nextAction || "Call back");
+            if (enquiry.nextActionDate) {
+                const dateObj = enquiry.nextActionDate.toDate();
+                setFormNextDate(format(dateObj, "yyyy-MM-dd"));
+            }
+        }
+    }, [useSameAsBefore, enquiry]);
+
     // --- Helpers ---
     const getEnquiryAge = (createdAt: any) => createdAt ? differenceInDays(new Date(), createdAt.toDate()) : 0;
     const formatDate = (ts: any, fmt: string = "dd MMM") => ts ? format(ts.toDate(), fmt) : "--";
@@ -160,7 +175,21 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                 finalRemark += ` (Intent: ${formIntentLevel})`;
             }
 
-            // --- 4. Handle Admission Logic ---
+            // --- 🛡️ NEW CLEANUP LOGIC: Remove from Admissions if status changes ---
+            if (enquiry.status === "READY_ADMISSION" && formStatus !== "READY_ADMISSION" && formStatus !== "JOINED") {
+                const studentQuery = query(
+                    collection(db, "students"), 
+                    where("enquiryId", "==", enquiry.id), 
+                    where("status", "==", "NEW")
+                );
+                const studentSnap = await getDocs(studentQuery);
+                studentSnap.forEach((doc) => {
+                    batch.delete(doc.ref);
+                });
+                linkSentUpdate = false;
+            }
+
+            // --- 4. Handle Admission Logic (STRICT ORIGINAL LOGIC PRESERVED) ---
             if (formStatus === "READY_ADMISSION") {
                 nextActionText = "Onboard Student"; 
                 
@@ -433,16 +462,32 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                                 <div className="p-3 bg-[#E8F2F2] text-[#2D241E] rounded-xl text-sm font-medium text-center border border-[#BED9D8]">Joined! No further action.</div>
                             ) : (
                                 <div className={`space-y-3 p-4 rounded-xl border bg-white border-[#E8E0D5]`}>
-                                    <div className="flex items-center gap-2 text-xs font-bold text-[#8C7B6C] uppercase tracking-wider opacity-80">
-                                        <CalendarDays size={14} />
-                                        <span>Next Step Planning</span>
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 text-xs font-bold text-[#8C7B6C] uppercase tracking-wider opacity-80">
+                                          <CalendarDays size={14} />
+                                          <span>Next Step Planning</span>
+                                      </div>
+
+                                      {/* --- NEW CHECKBOX ADDED HERE --- */}
+                                      <label className="flex items-center gap-2 cursor-pointer group">
+                                          <input 
+                                              type="checkbox"
+                                              checked={useSameAsBefore}
+                                              onChange={(e) => setUseSameAsBefore(e.target.checked)}
+                                              className="w-3.5 h-3.5 border-2 border-[#E8E0D5] rounded bg-white checked:bg-[#C5A880] checked:border-[#C5A880] appearance-none transition-all cursor-pointer"
+                                          />
+                                          <span className="text-[10px] font-bold text-[#8C7B6C] group-hover:text-[#4A4036] transition-colors flex items-center gap-1">
+                                              <RefreshCcw size={10} className={useSameAsBefore ? "animate-spin-slow" : ""} />
+                                              Same as before
+                                          </span>
+                                      </label>
                                     </div>
                                     
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
                                             <select 
                                                 value={formNextAction} 
-                                                onChange={e => setFormNextAction(e.target.value)}
+                                                onChange={e => { setFormNextAction(e.target.value); setUseSameAsBefore(false); }}
                                                 className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none focus:ring-1 focus:ring-[#C5A880]"
                                             >
                                                 {NEXT_ACTIONS.map(action => (
@@ -454,7 +499,7 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                                             <input 
                                                 type="date" 
                                                 value={formNextDate} 
-                                                onChange={e => setFormNextDate(e.target.value)} 
+                                                onChange={e => { setFormNextDate(e.target.value); setUseSameAsBefore(false); }} 
                                                 className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none focus:ring-1 focus:ring-[#C5A880]" 
                                             />
                                         </div>
@@ -491,11 +536,7 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                             className={`px-6 py-3 text-white rounded-xl font-bold text-sm shadow-sm flex items-center gap-2 transition-all active:scale-95 
                                 ${formStatus === "READY_ADMISSION" && !enquiry.linkSent ? "bg-[#7D9D75] hover:bg-[#5D7352]" : "bg-[#2D241E] hover:bg-[#4A4036]"}`}
                         >
-                            {saving ? "..." : (
-                                formStatus === "READY_ADMISSION"
-                                    ? <><Save size={16}/> Save</> 
-                                    : <><Save size={16} /> Save</>
-                            )}
+                            {saving ? "..." : <><Save size={16} /> Save</>}
                         </button>
                     </div>
                 </div>

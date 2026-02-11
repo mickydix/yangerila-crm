@@ -12,7 +12,11 @@ import {
   Eye,
   Check,
   ChevronDown,
-  Users 
+  Users,
+  Plus,
+  X,
+  AlertCircle,
+  Save
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
@@ -22,10 +26,14 @@ import {
   getDocs, 
   where,
   limit,
-  Timestamp
+  Timestamp,
+  doc,
+  getCountFromServer,
+  writeBatch
 } from "firebase/firestore";
 import { format, startOfMonth, endOfMonth, parse } from "date-fns";
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
+import { useAuth } from "@/lib/useAuth";
 
 type Enquiry = {
   id: string;
@@ -33,6 +41,7 @@ type Enquiry = {
   phone: string;
   status: "CALL_AGAIN" | "READY_DEMO" | "DEMO_TAKEN" | "READY_ADMISSION" | "NOT_JOINING" | "JOINED";
   srmName?: string;
+  srmId?: string;
   lastRemark: string;
   createdAt: any;
   enqId: string;
@@ -43,6 +52,12 @@ type Enquiry = {
   linkSent?: boolean;
 };
 
+// Types for SRM selection
+type SRMSelection = {
+    id: string;
+    name: string;
+};
+
 const ADMIN_STATUS_CONFIG = [
     { label: "Follow Up", value: "CALL_AGAIN", color: "bg-[#FFFBEB] text-[#92400E] border-[#FDE68A]" },
     { label: "Ready for Demo", value: "READY_DEMO", color: "bg-[#EFF6FF] text-[#1D4ED8] border-[#BFDBFE]" },
@@ -50,10 +65,40 @@ const ADMIN_STATUS_CONFIG = [
     { label: "Ready for Admission", value: "READY_ADMISSION", color: "bg-[#F0FDF4] text-[#15803D] border-[#BBF7D0]" },
 ];
 
+const SOURCES = ["Instagram", "Facebook", "Referral", "Google", "Walk-in", "Justdial", "Other"];
+const ACTIONS = ["Called", "Sent Message"];
+const STATUSES = [
+    { label: "Follow Up", value: "CALL_AGAIN" },
+    { label: "Ready for Demo", value: "READY_DEMO" },
+    { label: "Demo Taken", value: "DEMO_TAKEN" },
+    { label: "Ready for Admission", value: "READY_ADMISSION" },
+    { label: "Not Joining", value: "NOT_JOINING" },
+];
+
 export default function AdminEnquiriesPage() {
+  const { appUser } = useAuth();
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedEnquiry, setSelectedEnquiry] = useState<Enquiry | null>(null);
+
+  // --- ADD ENQUIRY MODAL STATE ---
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [cancelStage, setCancelStage] = useState<0 | 1>(0);
+  const [availableSRMs, setAvailableSRMs] = useState<SRMSelection[]>([]);
+
+  const initialForm = {
+      name: "",
+      phone: "",
+      source: SOURCES[0],
+      action: "Called",
+      remark: "",
+      status: "CALL_AGAIN",
+      nextAction: "",
+      nextActionDate: "",
+      assignedSRMId: ""
+  };
+  const [form, setForm] = useState(initialForm);
 
   // Filters
   const [searchTerm, setSearchTerm] = useState("");
@@ -104,6 +149,17 @@ export default function AdminEnquiriesPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Fetch SRMs for the assignment dropdown
+  useEffect(() => {
+    const fetchSRMs = async () => {
+        const q = query(collection(db, "srms"), where("status", "==", "ACTIVE"));
+        const snap = await getDocs(q);
+        const list = snap.docs.map(d => ({ id: d.id, name: d.data().name }));
+        setAvailableSRMs(list);
+    };
+    fetchSRMs();
+  }, []);
+
   useEffect(() => {
     const fetchEnquiries = async () => {
       setLoading(true);
@@ -148,6 +204,92 @@ export default function AdminEnquiriesPage() {
       }
   };
 
+  const handleCancel = () => {
+      if (cancelStage === 0) {
+          setCancelStage(1);
+      } else {
+          setIsModalOpen(false);
+          setForm(initialForm);
+          setCancelStage(0);
+      }
+  };
+
+  const handleSaveEnquiry = async () => {
+      if (!form.name || !form.phone || !form.nextActionDate || !form.assignedSRMId) {
+          return alert("Please fill Name, Phone, Next Action Date and assign an SRM.");
+      }
+      
+      setSaving(true);
+      try {
+          const now = new Date();
+          const yearLastDigit = now.getFullYear().toString().slice(-1);
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const day = String(now.getDate()).padStart(2, '0');
+          
+          const startOfDayDate = new Date(now.setHours(0, 0, 0, 0));
+          const endOfDayDate = new Date(now.setHours(23, 59, 59, 999));
+          
+          const q = query(
+              collection(db, "enquiries"),
+              where("createdAt", ">=", Timestamp.fromDate(startOfDayDate)),
+              where("createdAt", "<=", Timestamp.fromDate(endOfDayDate))
+          );
+          
+          const snapshot = await getCountFromServer(q);
+          const count = snapshot.data().count; 
+          const suffix = String.fromCharCode(97 + count); 
+          const enqId = `Q${yearLastDigit}${month}${day}${suffix}`;
+
+          const selectedSRM = availableSRMs.find(s => s.id === form.assignedSRMId);
+
+          const batch = writeBatch(db);
+          const newEnqRef = doc(collection(db, "enquiries"));
+          
+          const parentData = {
+              name: form.name,
+              phone: form.phone,
+              source: form.source,
+              enqId: enqId,
+              status: form.status,
+              lastAction: form.action,
+              lastActionDate: null, 
+              lastRemark: form.remark,
+              nextAction: form.nextAction || "Follow up",
+              nextActionDate: Timestamp.fromDate(new Date(form.nextActionDate)),
+              srmId: form.assignedSRMId,
+              srmName: selectedSRM?.name || "Unknown",
+              createdAt: Timestamp.now(),
+          };
+
+          batch.set(newEnqRef, parentData);
+
+          const timelineRef = doc(collection(db, "enquiries", newEnqRef.id, "timeline"));
+          batch.set(timelineRef, {
+              action: form.action,
+              remark: form.remark,
+              date: Timestamp.now(),
+              status: form.status,
+              by: `Admin (${appUser?.name || "Admin"})`
+          });
+
+          await batch.commit();
+
+          // Update local list
+          setEnquiries(prev => [{ id: newEnqRef.id, ...parentData } as Enquiry, ...prev]);
+
+          setIsModalOpen(false);
+          setForm(initialForm);
+          setCancelStage(0);
+          alert(`Enquiry Created & Assigned Successfully!\nID: ${enqId}\nAssigned to: ${selectedSRM?.name}`);
+
+      } catch (e) {
+          console.error(e);
+          alert("Failed to save enquiry.");
+      } finally {
+          setSaving(false);
+      }
+  };
+
   const formatDate = (ts: any) => {
     if (!ts) return "--";
     return format(ts.toDate(), "dd MMM");
@@ -172,9 +314,18 @@ export default function AdminEnquiriesPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
       <div className="space-y-4">
-        <div>
-          <h1 className="text-3xl font-serif font-bold text-[#2D241E]">Active Enquiries</h1>
-          <p className="text-[#8C7B6C] text-sm">Real-time feed of open cases across all SRMs</p>
+        <div className="flex justify-between items-end">
+          <div>
+            <h1 className="text-3xl font-serif font-bold text-[#2D241E]">Active Enquiries</h1>
+            <p className="text-[#8C7B6C] text-sm">Real-time feed of open cases across all SRMs</p>
+          </div>
+          {/* --- ADD ENQUIRY BUTTON --- */}
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-2 bg-[#C5A880] hover:bg-[#B89A72] text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-[#C5A880]/20 transition-all active:scale-95"
+          >
+            <Plus size={18} /> Add Enquiry
+          </button>
         </div>
 
         <div className="flex w-full gap-2">
@@ -254,7 +405,6 @@ export default function AdminEnquiriesPage() {
                 )}
             </div>
 
-            {/* --- SRM Filter Dropdown (Fixed Button Text) --- */}
             <div className="relative inline-block text-left" ref={srmMenuRef}>
                 <button 
                     onClick={() => setShowSRMMenu(!showSRMMenu)}
@@ -402,6 +552,142 @@ export default function AdminEnquiriesPage() {
             priorityLabel={`Assigned to: ${selectedEnquiry.srmName || "SRM"}`} 
         />
       )}
+
+      {/* --- ADMIN ADD ENQUIRY MODAL --- */}
+      {isModalOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
+              <div className="bg-[#FDFDFD] w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden border border-[#E8E0D5]">
+                  
+                  <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white">
+                      <h2 className="text-xl font-serif font-bold text-[#2D241E]">Admin: Add & Assign Lead</h2>
+                      <button onClick={handleCancel} className="p-2 hover:bg-[#F5F0EB] text-[#8C7B6C] rounded-full transition-colors">
+                          <X size={24}/>
+                      </button>
+                  </div>
+
+                  <div className="p-6 space-y-6 overflow-y-auto">
+                      
+                      {/* Section 1: Basic Info */}
+                      <div className="space-y-4">
+                          <div>
+                              <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Student Name</label>
+                              <input 
+                                  className="w-full border-b border-[#E8E0D5] p-2 outline-none font-serif font-medium text-[#2D241E] focus:border-[#C5A880] transition-colors text-lg bg-transparent placeholder:text-[#E8E0D5]"
+                                  placeholder="e.g. Rahul Sharma"
+                                  value={form.name}
+                                  onChange={e => setForm({...form, name: e.target.value})}
+                              />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Phone</label>
+                                  <input 
+                                      className="w-full border-b border-[#E8E0D5] p-2 outline-none font-medium text-[#4A4036] focus:border-[#C5A880] transition-colors bg-transparent placeholder:text-[#E8E0D5]"
+                                      placeholder="98765..."
+                                      value={form.phone}
+                                      onChange={e => setForm({...form, phone: e.target.value})}
+                                  />
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Source</label>
+                                  <select 
+                                      className="w-full border-b border-[#E8E0D5] p-2 outline-none bg-transparent font-medium text-[#4A4036] focus:border-[#C5A880]"
+                                      value={form.source}
+                                      onChange={e => setForm({...form, source: e.target.value})}
+                                  >
+                                      {SOURCES.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                              </div>
+                          </div>
+                      </div>
+
+                      {/* Section 2: Assignment & Status */}
+                      <div className="bg-[#F5F0EB] p-5 rounded-2xl space-y-4 border border-[#E8E0D5]">
+                          <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                  <label className="block text-xs font-bold text-[#C5A880] uppercase mb-1">Assign to SRM</label>
+                                  <select 
+                                      className="w-full p-2.5 rounded-lg border border-[#E8E0D5] outline-none font-bold text-sm bg-white text-[#2D241E] focus:border-[#C5A880]"
+                                      value={form.assignedSRMId}
+                                      onChange={e => setForm({...form, assignedSRMId: e.target.value})}
+                                  >
+                                      <option value="">Select SRM...</option>
+                                      {availableSRMs.map(srm => <option key={srm.id} value={srm.id}>{srm.name}</option>)}
+                                  </select>
+                              </div>
+                              <div>
+                                  <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Initial Status</label>
+                                  <select 
+                                      className="w-full p-2.5 rounded-lg border border-[#E8E0D5] outline-none font-bold text-sm bg-white text-[#2D241E] focus:border-[#C5A880]"
+                                      value={form.status}
+                                      onChange={e => setForm({...form, status: e.target.value as any})}
+                                  >
+                                      {STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                                  </select>
+                              </div>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Admin Remark</label>
+                              <textarea 
+                                  className="w-full p-3 rounded-xl border border-[#E8E0D5] outline-none text-sm resize-none h-24 bg-white text-[#4A4036] focus:border-[#C5A880] placeholder:text-[#D6CCC6]"
+                                  placeholder="Special instructions for SRM..."
+                                  value={form.remark}
+                                  onChange={e => setForm({...form, remark: e.target.value})}
+                              />
+                          </div>
+                      </div>
+
+                      {/* Section 3: Next Steps */}
+                      <div className="grid grid-cols-2 gap-4">
+                          <div>
+                              <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Next Action</label>
+                              <select
+                                  className="w-full border-b border-[#E8E0D5] p-2 outline-none bg-transparent font-medium text-[#4A4036] focus:border-[#C5A880]"
+                                  value={form.nextAction}
+                                  onChange={e => setForm({...form, nextAction: e.target.value})}
+                              >
+                                  <option value="">Select Action...</option>
+                                  <option value="Call back">Call back</option>
+                                  <option value="Schedule demo">Schedule demo</option>
+                              </select>
+                          </div>
+                          <div>
+                              <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Date</label>
+                              <input 
+                                  type="date"
+                                  className="w-full border-b border-[#E8E0D5] p-2 outline-none font-medium text-[#4A4036] focus:border-[#C5A880] bg-transparent"
+                                  value={form.nextActionDate}
+                                  onChange={e => setForm({...form, nextActionDate: e.target.value})}
+                              />
+                          </div>
+                      </div>
+                  </div>
+
+                  {/* Footer Buttons */}
+                  <div className="mt-6 flex gap-3 pt-4 border-t border-[#E8E0D5] shrink-0 p-6 bg-white">
+                      <button 
+                          onClick={handleCancel}
+                          className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2
+                              ${cancelStage === 1 
+                                  ? "bg-[#D96C6C]/10 text-[#D96C6C] border border-[#D96C6C]/20 hover:bg-[#D96C6C]/20" 
+                                  : "text-[#8C7B6C] hover:bg-[#F5F0EB]"}`}
+                      >
+                          {cancelStage === 1 ? <><AlertCircle size={16} /> Discard?</> : "Cancel"}
+                      </button>
+                      
+                      <button 
+                          onClick={handleSaveEnquiry}
+                          disabled={saving}
+                          className="flex-[2] py-3 text-sm font-bold text-white bg-[#C5A880] rounded-xl hover:bg-[#B89A72] shadow-lg flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                      >
+                          {saving ? "Saving..." : <><Save size={18} /> Save & Assign</>}
+                      </button>
+                  </div>
+
+              </div>
+          </div>
+      )}
+
     </div>
   );
 }
