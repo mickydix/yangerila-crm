@@ -14,7 +14,8 @@ import {
   User,
   LogOut,
   ShieldCheck,
-  Briefcase
+  Briefcase,
+  ArrowLeft 
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
@@ -28,6 +29,7 @@ import {
     writeBatch 
 } from "firebase/firestore";
 import { format } from "date-fns";
+import Link from "next/link";
 
 // --- Types ---
 type SRM = {
@@ -45,7 +47,7 @@ type SRM = {
 export default function AdminSRMsPage() {
   // State
   const [srms, setSrms] = useState<SRM[]>([]);
-  const [selectedSrmId, setSelectedSrmId] = useState<string | null>(null);
+  const [selectedSRM, setSelectedSRM] = useState<SRM | null>(null);
   const [loading, setLoading] = useState(true);
   
   // UI State
@@ -70,10 +72,6 @@ export default function AdminSRMsPage() {
         // Sort by joining date desc
         list.sort((a, b) => b.joiningDate?.toMillis() - a.joiningDate?.toMillis());
         setSrms(list);
-        
-        // Auto-select first active srm
-        const firstActive = list.find(s => s.status === "ACTIVE" || s.status === "NEW");
-        if (firstActive && !selectedSrmId) setSelectedSrmId(firstActive.id);
       } catch (e) {
         console.error("Error fetching SRMs", e);
       } finally {
@@ -87,23 +85,17 @@ export default function AdminSRMsPage() {
 
   const handleAddSRM = async () => {
       if (!addForm.name || !addForm.email || !addForm.ycsId) return alert("All fields required");
-      
       try {
           const newSRM = {
               ...addForm,
-              status: "NEW", // Important: Created as NEW so they can set password
+              status: "NEW" as const, 
               joiningDate: Timestamp.now(),
-              phone: "" // Placeholder
+              phone: "" 
           };
-          
           const ref = await addDoc(collection(db, "srms"), newSRM);
-          
-          // Update Local State
           setSrms(prev => [{ id: ref.id, ...newSRM } as SRM, ...prev]);
           setIsAddModalOpen(false);
           setAddForm({ name: "", email: "", ycsId: "" });
-          setSelectedSrmId(ref.id); // Switch to new SRM
-
       } catch (e) {
           console.error(e);
           alert("Failed to add SRM");
@@ -111,12 +103,11 @@ export default function AdminSRMsPage() {
   };
 
   const handleUpdateSRM = async () => {
-      if (!selectedSrmId || !editForm) return;
+      if (!selectedSRM || !editForm) return;
       try {
-          await updateDoc(doc(db, "srms", selectedSrmId), editForm);
-          
-          // Update Local
-          setSrms(prev => prev.map(s => s.id === selectedSrmId ? { ...s, ...editForm } : s));
+          await updateDoc(doc(db, "srms", selectedSRM.id), editForm);
+          setSrms(prev => prev.map(s => s.id === selectedSRM.id ? { ...s, ...editForm } : s));
+          setSelectedSRM(prev => prev ? { ...prev, ...editForm } : null);
           setIsEditMode(false);
       } catch (e) {
           console.error(e);
@@ -125,23 +116,32 @@ export default function AdminSRMsPage() {
   };
 
   const handleRemoveSRM = async () => {
-      if (!selectedSrmId) return;
+      if (!selectedSRM) return;
       if (!confirm("Are you sure? This will move the SRM to 'Ex-SRMs'.")) return;
 
       try {
           const batchOp = writeBatch(db);
+          const srmRef = doc(db, "srms", selectedSRM.id);
           
-          // 1. Mark SRM as LEFT
-          const srmRef = doc(db, "srms", selectedSrmId);
+          // Explicitly typing the status to solve the TS error
+          const newStatus: "LEFT" = "LEFT";
+          const leavingDate = Timestamp.now();
+
           batchOp.update(srmRef, {
-              status: "LEFT",
-              leavingDate: Timestamp.now()
+              status: newStatus,
+              leavingDate: leavingDate
           });
 
           await batchOp.commit();
 
-          // Update Local State
-          setSrms(prev => prev.map(s => s.id === selectedSrmId ? { ...s, status: "LEFT", leavingDate: Timestamp.now() } : s));
+          // Update Local State with fixed types
+          setSrms(prev => prev.map(s => 
+              s.id === selectedSRM.id 
+              ? { ...s, status: newStatus, leavingDate: leavingDate } 
+              : s
+          ));
+          
+          setSelectedSRM(null);
           setFilterStatus("LEFT"); 
 
       } catch (e) {
@@ -154,304 +154,190 @@ export default function AdminSRMsPage() {
   const filteredSRMs = useMemo(() => {
       return srms.filter(s => {
           const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.ycsId.toLowerCase().includes(searchTerm.toLowerCase());
-          
           const matchesStatus = filterStatus === "ACTIVE" 
               ? (s.status === "ACTIVE" || s.status === "NEW") 
               : s.status === "LEFT";
-              
           return matchesSearch && matchesStatus;
       });
   }, [srms, searchTerm, filterStatus]);
 
-  const selectedSRM = srms.find(s => s.id === selectedSrmId);
-
   return (
-    <div className="flex h-[calc(100vh-6rem)] bg-[#FDFDFD] border border-[#E8E0D5] rounded-3xl overflow-hidden shadow-sm">
-      
-      {/* --- LEFT SIDE: LIST --- */}
-      <div className="w-96 bg-[#FDFDFD] border-r border-[#E8E0D5] flex flex-col h-full shrink-0">
-        
-        {/* Header & Add Button */}
-        <div className="p-6 border-b border-[#E8E0D5] space-y-5">
-            <div className="flex justify-between items-center">
-                <h1 className="text-2xl font-serif font-bold text-[#2D241E]">SRM Team</h1>
-                <button 
-                    onClick={() => setIsAddModalOpen(true)}
-                    className="p-2.5 bg-[#2D241E] text-white rounded-xl hover:bg-[#4A4036] transition-colors shadow-lg shadow-[#2D241E]/20 active:scale-95"
-                >
-                    <UserPlus size={18} />
-                </button>
-            </div>
+    <div className="max-w-6xl mx-auto space-y-6 p-4">
+      {/* --- BACK BUTTON --- */}
+      <Link 
+        href="/admin" 
+        className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"
+      >
+        <ArrowLeft size={16} /> Back to Dashboard
+      </Link>
 
-            {/* Search */}
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8C7B6C]" size={18} />
-                <input 
-                    placeholder="Search name or ID..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full bg-[#F5F0EB] border border-[#E8E0D5] rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#C5A880] text-[#4A4036] placeholder:text-[#B0A090]"
-                />
-            </div>
-
-            {/* Tabs */}
-            <div className="flex bg-[#F5F0EB] p-1.5 rounded-xl border border-[#E8E0D5]">
-                <button 
-                    onClick={() => setFilterStatus("ACTIVE")}
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                        filterStatus === "ACTIVE" 
-                        ? "bg-white shadow-sm text-[#2D241E] ring-1 ring-black/5" 
-                        : "text-[#8C7B6C] hover:text-[#4A4036]"
-                    }`}
-                >
-                    Active Team
-                </button>
-                <button 
-                    onClick={() => setFilterStatus("LEFT")}
-                    className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${
-                        filterStatus === "LEFT" 
-                        ? "bg-white shadow-sm text-[#2D241E] ring-1 ring-black/5" 
-                        : "text-[#8C7B6C] hover:text-[#4A4036]"
-                    }`}
-                >
-                    Ex-Employees
-                </button>
-            </div>
+      {/* Header Section */}
+      <div className="flex justify-between items-end">
+        <div>
+          <h1 className="text-3xl font-serif font-bold text-[#2D241E]">SRM Team</h1>
+          <p className="text-[#8C7B6C] text-sm">Manage access and profiles for your SRM team</p>
         </div>
+        <button 
+          onClick={() => setIsAddModalOpen(true)}
+          className="flex items-center gap-2 bg-[#2D241E] hover:bg-[#4A4036] text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-[#2D241E]/20 transition-all active:scale-95"
+        >
+          <UserPlus size={18} /> Add SRM
+        </button>
+      </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
-            {loading ? (
-                <div className="p-8 text-center text-[#8C7B6C] text-sm">Loading staff...</div>
-            ) : filteredSRMs.length === 0 ? (
-                <div className="p-8 text-center text-[#8C7B6C] text-sm italic">No records found.</div>
-            ) : (
-                filteredSRMs.map(s => (
-                    <div 
-                        key={s.id}
-                        onClick={() => setSelectedSrmId(s.id)}
-                        className={`px-6 py-4 border-b border-[#E8E0D5] cursor-pointer transition-all flex items-center gap-4 group
-                            ${selectedSrmId === s.id ? "bg-[#F5F0EB]" : "hover:bg-[#F9F7F5]"}`}
-                    >
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-serif text-lg font-bold overflow-hidden shadow-sm
-                            ${selectedSrmId === s.id ? "bg-[#2D241E] text-white" : "bg-[#F5F0EB] text-[#8C7B6C]"}`}>
-                            {s.profileImage ? <img src={s.profileImage} className="w-full h-full object-cover" /> : s.name.charAt(0)}
-                        </div>
-                        <div className="flex-1">
-                            <h3 className={`font-bold text-sm ${selectedSrmId === s.id ? "text-[#2D241E]" : "text-[#4A4036]"}`}>
-                                {s.name}
-                            </h3>
-                            <p className="text-xs text-[#8C7B6C] font-medium">{s.ycsId}</p>
-                        </div>
-                        {s.status === "ACTIVE" ? <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" /> : 
-                         s.status === "NEW" ? <div className="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.4)]" title="Pending Setup"/> :
-                         <div className="w-2 h-2 rounded-full bg-red-400" />}
-                    </div>
-                ))
-            )}
+      {/* Filter & Search Row */}
+      <div className="flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#8C7B6C]" size={20} />
+          <input 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)} 
+            placeholder="Search name or ID..." 
+            className="w-full pl-12 pr-4 py-3 bg-white border border-[#E8E0D5] rounded-xl outline-none focus:ring-2 focus:ring-[#C5A880] transition-all shadow-sm placeholder:text-[#B0A090]" 
+          />
+        </div>
+        <div className="flex bg-[#F5F0EB] p-1 rounded-xl border border-[#E8E0D5]">
+          {["ACTIVE", "LEFT"].map((status) => (
+            <button 
+              key={status}
+              onClick={() => setFilterStatus(status as any)}
+              className={`px-6 py-2 text-xs font-bold rounded-lg transition-all ${
+                filterStatus === status 
+                ? "bg-white shadow-sm text-[#2D241E]" 
+                : "text-[#8C7B6C] hover:text-[#4A4036]"
+              }`}
+            >
+              {status === "ACTIVE" ? "Active Team" : "Ex-Employees"}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* --- RIGHT SIDE: DETAILS --- */}
-      <div className="flex-1 bg-[#FAFAFA] relative overflow-hidden flex flex-col">
-         {/* Background Decoration */}
-         <div className="absolute top-[-20%] right-[-10%] w-[400px] h-[400px] rounded-full bg-[#C5A880]/10 mix-blend-multiply filter blur-3xl opacity-50 pointer-events-none"></div>
-
-         {selectedSRM ? (
-             <div className="h-full flex flex-col w-full p-8 overflow-y-auto relative z-10">
-                 
-                 {/* Top Profile Card */}
-                 <div className="bg-white rounded-3xl p-8 border border-[#E8E0D5] shadow-sm mb-6 relative">
-                     {/* Edit Toggle */}
-                     {filterStatus === "ACTIVE" && (
-                         <div className="absolute top-8 right-8 flex gap-2">
-                             {isEditMode ? (
-                                 <>
-                                     <button onClick={() => setIsEditMode(false)} className="p-2 text-[#8C7B6C] hover:bg-[#F5F0EB] rounded-lg"><X size={20}/></button>
-                                     <button onClick={handleUpdateSRM} className="p-2 bg-[#2D241E] text-white rounded-lg hover:bg-[#4A4036]"><Save size={20}/></button>
-                                 </>
-                             ) : (
-                                 <button 
-                                     onClick={() => { setIsEditMode(true); setEditForm(selectedSRM); }}
-                                     className="p-2 text-[#8C7B6C] hover:text-[#2D241E] hover:bg-[#F5F0EB] rounded-lg transition-colors"
-                                 >
-                                     <Edit2 size={20} />
-                                 </button>
-                             )}
-                         </div>
-                     )}
-
-                     <div className="flex items-start gap-8">
-                         <div className="w-32 h-32 rounded-full bg-[#F5F0EB] border-4 border-white shadow-xl flex items-center justify-center text-4xl font-serif font-bold text-[#8C7B6C] overflow-hidden shrink-0">
-                            {selectedSRM.profileImage ? <img src={selectedSRM.profileImage} className="w-full h-full object-cover" /> : selectedSRM.name.charAt(0)}
-                         </div>
-                         <div className="flex-1 pt-2 space-y-2">
-                             {isEditMode ? (
-                                 <input 
-                                     value={editForm.name || ""} 
-                                     onChange={e => setEditForm({...editForm, name: e.target.value})}
-                                     className="text-3xl font-serif font-bold text-[#2D241E] bg-transparent border-b border-[#C5A880] outline-none w-full pb-1"
-                                 />
-                             ) : (
-                                 <h1 className="text-3xl font-serif font-bold text-[#2D241E]">{selectedSRM.name}</h1>
-                             )}
-                             
-                             <div className="flex items-center gap-3 text-[#8C7B6C] font-medium">
-                                 <span className="bg-[#2D241E] text-white px-2 py-1 rounded text-xs font-bold tracking-wide">{selectedSRM.ycsId}</span>
-                                 <span>•</span>
-                                 <span className="text-sm">Joined {selectedSRM.joiningDate ? format(selectedSRM.joiningDate.toDate(), "PPP") : "N/A"}</span>
-                             </div>
-
-                             {selectedSRM.status === "LEFT" && (
-                                 <div className="mt-4 inline-flex items-center gap-2 text-red-700 bg-red-50 border border-red-100 px-3 py-1.5 rounded-lg text-sm font-bold">
-                                     <LogOut size={16} /> Left on {selectedSRM.leavingDate ? format(selectedSRM.leavingDate.toDate(), "PPP") : "Unknown"}
-                                 </div>
-                             )}
-                             {selectedSRM.status === "NEW" && (
-                                 <div className="mt-4 inline-flex items-center gap-2 text-blue-700 bg-blue-50 border border-blue-100 px-3 py-1.5 rounded-lg text-sm font-bold">
-                                     <ShieldCheck size={16} /> Setup Pending
-                                 </div>
-                             )}
-                         </div>
-                     </div>
-                     
-                     {/* Contact Grid */}
-                     <div className="grid grid-cols-2 gap-4 mt-8 pt-8 border-t border-[#E8E0D5]">
-                         <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 rounded-full bg-[#F5F0EB] flex items-center justify-center text-[#4A4036]"><Phone size={18} /></div>
-                             <div className="flex-1">
-                                 <div className="text-xs font-bold text-[#8C7B6C] uppercase tracking-wider">Phone</div>
-                                 {isEditMode ? (
-                                     <input 
-                                         value={editForm.phone || ""}
-                                         onChange={e => setEditForm({...editForm, phone: e.target.value})}
-                                         className="font-medium text-[#2D241E] w-full border-b border-[#C5A880] bg-transparent outline-none" 
-                                         placeholder="Add number"
-                                     />
-                                 ) : (
-                                     <div className="font-medium text-[#2D241E]">{selectedSRM.phone || "--"}</div>
-                                 )}
-                             </div>
-                         </div>
-                         <div className="flex items-center gap-3">
-                             <div className="w-10 h-10 rounded-full bg-[#F5F0EB] flex items-center justify-center text-[#4A4036]"><Mail size={18} /></div>
-                             <div className="flex-1">
-                                 <div className="text-xs font-bold text-[#8C7B6C] uppercase tracking-wider">Email</div>
-                                 {isEditMode ? (
-                                     <input 
-                                         value={editForm.email || ""}
-                                         onChange={e => setEditForm({...editForm, email: e.target.value})}
-                                         className="font-medium text-[#2D241E] w-full border-b border-[#C5A880] bg-transparent outline-none" 
-                                     />
-                                 ) : (
-                                     <div className="font-medium text-[#2D241E] truncate">{selectedSRM.email}</div>
-                                 )}
-                             </div>
-                         </div>
-                         {selectedSRM.phone && (
-                            <a href={`https://wa.me/${selectedSRM.phone}`} target="_blank" className="col-span-2 flex items-center gap-3 text-[#2D241E] hover:bg-[#F5F0EB] p-3 rounded-2xl transition-colors cursor-pointer border border-transparent hover:border-[#E8E0D5]">
-                                <div className="w-10 h-10 rounded-full bg-[#25D366]/20 text-[#128C7E] flex items-center justify-center"><MessageCircle size={18} /></div>
-                                <div>
-                                    <div className="text-xs font-bold text-[#128C7E] uppercase">Quick Action</div>
-                                    <div className="font-bold">Chat on WhatsApp</div>
-                                </div>
-                            </a>
-                         )}
-                     </div>
-                 </div>
-
-                 {/* Stats or placeholder (Future expansion) */}
-                 <div className="grid grid-cols-2 gap-4">
-                     <div className="bg-white p-6 rounded-3xl border border-[#E8E0D5] shadow-sm">
-                        <div className="flex items-center gap-2 text-[#8C7B6C] mb-2">
-                             <Briefcase size={16} />
-                             <span className="text-xs font-bold uppercase">Role</span>
-                        </div>
-                        <div className="text-xl font-serif font-bold text-[#2D241E]">Student Relationship Manager</div>
-                     </div>
-                 </div>
-                 
-                 {/* Remove Button */}
-                 {isEditMode && filterStatus === "ACTIVE" && (
-                     <div className="mt-auto pt-6 text-right">
-                         <button 
-                            onClick={handleRemoveSRM}
-                            className="text-red-500 font-bold text-sm hover:bg-red-50 px-4 py-2 rounded-lg transition-colors flex items-center gap-2 ml-auto"
-                         >
-                             <Trash2 size={16} /> Move to Ex-Employees
-                         </button>
-                     </div>
-                 )}
-
-             </div>
-         ) : (
-             <div className="h-full flex flex-col items-center justify-center text-[#C5A880]">
-                 <User size={64} className="mb-4 opacity-20" />
-                 <p className="font-serif italic text-lg opacity-60">Select a team member to view details.</p>
-             </div>
-         )}
-      </div>
-
-      {/* --- ADD MODAL --- */}
-      {isAddModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
-              <div className="bg-[#FDFDFD] w-full max-w-md rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 border border-[#E8E0D5]">
-                  <div className="flex justify-between items-center mb-8">
-                      <h3 className="text-2xl font-serif font-bold text-[#2D241E]">Add New SRM</h3>
-                      <button onClick={() => setIsAddModalOpen(false)} className="p-2 hover:bg-[#F5F0EB] text-[#8C7B6C] rounded-full transition-colors">
-                          <X size={24} />
-                      </button>
-                  </div>
-                  
-                  <div className="space-y-5">
-                      <div>
-                          <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Full Name</label>
-                          <input 
-                              value={addForm.name}
-                              onChange={(e) => setAddForm({...addForm, name: e.target.value})}
-                              className="w-full bg-[#F5F0EB] p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-[#C5A880] text-[#2D241E] font-medium placeholder:text-[#B0A090]"
-                              placeholder="e.g. Sarah Smith"
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Email Address</label>
-                          <input 
-                              type="email"
-                              value={addForm.email}
-                              onChange={(e) => setAddForm({...addForm, email: e.target.value})}
-                              className="w-full bg-[#F5F0EB] p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-[#C5A880] text-[#2D241E] font-medium placeholder:text-[#B0A090]"
-                              placeholder="Used for login"
-                          />
-                      </div>
-                      <div>
-                          <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">YCS ID</label>
-                          <input 
-                              value={addForm.ycsId}
-                              onChange={(e) => setAddForm({...addForm, ycsId: e.target.value})}
-                              className="w-full bg-[#F5F0EB] p-3.5 rounded-xl outline-none focus:ring-2 focus:ring-[#C5A880] text-[#2D241E] font-medium placeholder:text-[#B0A090]"
-                              placeholder="Unique ID (e.g. SRM-01)"
-                          />
-                      </div>
-                  </div>
-
-                  <div className="mt-8 flex gap-3">
-                      <button 
-                          onClick={() => setIsAddModalOpen(false)}
-                          className="flex-1 py-3 text-sm font-bold text-[#8C7B6C] hover:bg-[#F5F0EB] rounded-xl transition-colors"
-                      >
-                          Cancel
-                      </button>
-                      <button 
-                          onClick={handleAddSRM}
-                          className="flex-[2] py-3 text-sm font-bold text-white bg-[#C5A880] rounded-xl hover:bg-[#B89A72] shadow-lg transition-colors"
-                      >
-                          Create Account
-                      </button>
-                  </div>
+      {/* Main Grid View */}
+      <div className="bg-[#FDFDFD] border border-[#E8E0D5] rounded-3xl overflow-hidden shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
+          {loading ? (
+            <div className="col-span-full py-12 text-center text-[#8C7B6C]">Loading team members...</div>
+          ) : filteredSRMs.length === 0 ? (
+            <div className="col-span-full py-12 text-center text-[#8C7B6C] italic">No SRMs found.</div>
+          ) : (
+            filteredSRMs.map(s => (
+              <div 
+                key={s.id}
+                onClick={() => setSelectedSRM(s)}
+                className="bg-white border border-[#E8E0D5] p-5 rounded-2xl hover:shadow-md transition-all cursor-pointer group flex items-center gap-4"
+              >
+                <div className="w-14 h-14 rounded-full bg-[#F5F0EB] flex items-center justify-center font-serif text-xl font-bold text-[#8C7B6C] overflow-hidden group-hover:bg-[#2D241E] group-hover:text-white transition-colors">
+                  {s.profileImage ? <img src={s.profileImage} className="w-full h-full object-cover" /> : s.name.charAt(0)}
+                </div>
+                <div className="flex-1">
+                  <h3 className="font-bold text-[#2D241E]">{s.name}</h3>
+                  <p className="text-xs text-[#8C7B6C] font-medium">{s.ycsId}</p>
+                </div>
+                <div className={`w-2 h-2 rounded-full ${s.status === 'ACTIVE' ? 'bg-green-500' : s.status === 'NEW' ? 'bg-blue-500' : 'bg-red-400'}`} />
               </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* --- SRM DETAILS POPUP MODAL --- */}
+      {selectedSRM && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
+          <div className="bg-[#FDFDFD] w-full max-w-2xl rounded-3xl shadow-2xl animate-in zoom-in-95 overflow-hidden border border-[#E8E0D5]">
+            <div className="flex justify-between items-center p-6 border-b border-[#E8E0D5]">
+              <h2 className="text-xl font-serif font-bold text-[#2D241E]">SRM Profile</h2>
+              <button 
+                onClick={() => { setSelectedSRM(null); setIsEditMode(false); }} 
+                className="p-2 hover:bg-[#F5F0EB] text-[#8C7B6C] rounded-full transition-colors"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="p-8 space-y-8">
+              {/* Profile Header in Modal */}
+              <div className="flex items-center gap-8">
+                <div className="w-24 h-24 rounded-full bg-[#F5F0EB] flex items-center justify-center text-3xl font-serif font-bold text-[#8C7B6C] overflow-hidden shadow-inner">
+                  {selectedSRM.profileImage ? <img src={selectedSRM.profileImage} className="w-full h-full object-cover" /> : selectedSRM.name.charAt(0)}
+                </div>
+                <div className="flex-1 space-y-2">
+                  {isEditMode ? (
+                    <input 
+                      value={editForm.name ?? selectedSRM.name} 
+                      onChange={e => setEditForm({...editForm, name: e.target.value})}
+                      className="text-2xl font-serif font-bold text-[#2D241E] border-b border-[#C5A880] bg-transparent outline-none w-full"
+                    />
+                  ) : (
+                    <h3 className="text-2xl font-serif font-bold text-[#2D241E]">{selectedSRM.name}</h3>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <span className="bg-[#2D241E] text-white px-2 py-0.5 rounded text-[10px] font-bold tracking-widest uppercase">{selectedSRM.ycsId}</span>
+                    <span className="text-xs text-[#8C7B6C] font-medium italic">Joined {format(selectedSRM.joiningDate.toDate(), "dd MMM yyyy")}</span>
+                  </div>
+                </div>
+                {filterStatus === "ACTIVE" && !isEditMode && (
+                  <button onClick={() => { setIsEditMode(true); setEditForm(selectedSRM); }} className="p-3 bg-[#F5F0EB] text-[#8C7B6C] rounded-xl hover:text-[#2D241E] transition-colors">
+                    <Edit2 size={20} />
+                  </button>
+                )}
+              </div>
+
+              {/* Data Fields in Modal */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-[#F9F7F5] p-6 rounded-2xl border border-[#E8E0D5]">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[#8C7B6C] uppercase tracking-wider">Email Address</label>
+                  {isEditMode ? (
+                    <input value={editForm.email ?? selectedSRM.email} onChange={e => setEditForm({...editForm, email: e.target.value})} className="w-full bg-white border border-[#E8E0D5] p-2 rounded-lg text-sm" />
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm font-medium text-[#4A4036]"><Mail size={14} className="text-[#C5A880]"/> {selectedSRM.email}</div>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-[#8C7B6C] uppercase tracking-wider">Phone Number</label>
+                  {isEditMode ? (
+                    <input value={editForm.phone ?? selectedSRM.phone} onChange={e => setEditForm({...editForm, phone: e.target.value})} className="w-full bg-white border border-[#E8E0D5] p-2 rounded-lg text-sm" />
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm font-medium text-[#4A4036]"><Phone size={14} className="text-[#C5A880]"/> {selectedSRM.phone || "Not set"}</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons in Modal */}
+              {isEditMode ? (
+                <div className="flex gap-3">
+                  <button onClick={handleUpdateSRM} className="flex-1 bg-[#2D241E] text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2"><Save size={18}/> Save Changes</button>
+                  <button onClick={handleRemoveSRM} className="p-3 text-red-500 hover:bg-red-50 rounded-xl transition-colors" title="Remove SRM"><Trash2 size={20}/></button>
+                </div>
+              ) : (
+                selectedSRM.phone && (
+                  <a href={`https://wa.me/${selectedSRM.phone}`} target="_blank" className="flex items-center justify-center gap-2 w-full py-4 bg-[#25D366] text-white rounded-2xl font-bold shadow-lg shadow-green-200 hover:scale-[1.02] transition-all">
+                    <MessageCircle size={20} /> Chat on WhatsApp
+                  </a>
+                )
+              )}
+            </div>
           </div>
+        </div>
       )}
 
+      {/* --- ADD SRM MODAL --- */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4">
+          <div className="bg-[#FDFDFD] w-full max-w-md rounded-3xl p-8 shadow-2xl border border-[#E8E0D5]">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-serif font-bold text-[#2D241E]">New Team Member</h3>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-[#8C7B6C] hover:text-[#2D241E]"><X size={24} /></button>
+            </div>
+            <div className="space-y-4">
+              <input value={addForm.name} onChange={e => setAddForm({...addForm, name: e.target.value})} placeholder="Full Name" className="w-full bg-[#F5F0EB] p-3 rounded-xl outline-none border border-transparent focus:border-[#C5A880]" />
+              <input value={addForm.email} onChange={e => setAddForm({...addForm, email: e.target.value})} placeholder="Email" className="w-full bg-[#F5F0EB] p-3 rounded-xl outline-none border border-transparent focus:border-[#C5A880]" />
+              <input value={addForm.ycsId} onChange={e => setAddForm({...addForm, ycsId: e.target.value})} placeholder="YCS ID (e.g. SRM-01)" className="w-full bg-[#F5F0EB] p-3 rounded-xl outline-none border border-transparent focus:border-[#C5A880]" />
+              <button onClick={handleAddSRM} className="w-full bg-[#C5A880] text-white py-4 rounded-xl font-bold shadow-lg shadow-[#C5A880]/20 hover:bg-[#B89A72] transition-colors mt-4">Create Account</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

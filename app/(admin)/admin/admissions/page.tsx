@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, Calendar } from "lucide-react";
+import { Check, Calendar, ArrowLeft } from "lucide-react"; // Added ArrowLeft
 import { db } from "@/lib/firebase";
 import { 
   collection, 
@@ -13,6 +13,7 @@ import {
   Timestamp,
   where
 } from "firebase/firestore";
+import Link from "next/link"; // Added Link
 
 type Student = {
   id: string;
@@ -94,7 +95,15 @@ export default function AdmissionsPage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl mx-auto space-y-6 p-4">
+      {/* --- BACK BUTTON --- */}
+      <Link 
+        href="/admin" 
+        className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"
+      >
+        <ArrowLeft size={16} /> Back to Dashboard
+      </Link>
+
       <div>
         <h1 className="text-3xl font-serif font-bold text-[#2D241E]">Admissions</h1>
         <p className="text-[#8C7B6C] text-sm">Manage new student onboarding</p>

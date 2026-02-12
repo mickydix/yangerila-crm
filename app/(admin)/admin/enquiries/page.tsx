@@ -7,8 +7,6 @@ import {
   User, 
   Phone, 
   MessageCircle,
-  ArrowUpDown,
-  ListFilter,
   Eye,
   Check,
   ChevronDown,
@@ -16,7 +14,9 @@ import {
   Plus,
   X,
   AlertCircle,
-  Save
+  Save,
+  ArrowLeft, // Added for back button
+  ListFilter
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
@@ -34,6 +34,7 @@ import {
 import { format, startOfMonth, endOfMonth, parse } from "date-fns";
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
 import { useAuth } from "@/lib/useAuth";
+import Link from "next/link"; // Added for back button
 
 type Enquiry = {
   id: string;
@@ -52,7 +53,6 @@ type Enquiry = {
   linkSent?: boolean;
 };
 
-// Types for SRM selection
 type SRMSelection = {
     id: string;
     name: string;
@@ -81,7 +81,6 @@ export default function AdminEnquiriesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedEnquiry, setSelectedEnquiry] = useState<Enquiry | null>(null);
 
-  // --- ADD ENQUIRY MODAL STATE ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cancelStage, setCancelStage] = useState<0 | 1>(0);
@@ -100,20 +99,16 @@ export default function AdminEnquiriesPage() {
   };
   const [form, setForm] = useState(initialForm);
 
-  // Filters
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<string>("ALL");
   const [activeSRM, setActiveSRM] = useState<string>("ALL"); 
   
-  // Sorting State
   const [sortBy, setSortBy] = useState<"createdAt">("createdAt");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  // Date Filter State
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [isAllTime, setIsAllTime] = useState(false);
 
-  // UI State for Menus
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const columnMenuRef = useRef<HTMLDivElement>(null);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -149,7 +144,6 @@ export default function AdminEnquiriesPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch SRMs for the assignment dropdown
   useEffect(() => {
     const fetchSRMs = async () => {
         const q = query(collection(db, "srms"), where("status", "==", "ACTIVE"));
@@ -274,7 +268,6 @@ export default function AdminEnquiriesPage() {
 
           await batch.commit();
 
-          // Update local list
           setEnquiries(prev => [{ id: newEnqRef.id, ...parentData } as Enquiry, ...prev]);
 
           setIsModalOpen(false);
@@ -313,13 +306,20 @@ export default function AdminEnquiriesPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
+      {/* --- BACK BUTTON --- */}
+      <Link 
+        href="/admin" 
+        className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"
+      >
+        <ArrowLeft size={16} /> Back to Dashboard
+      </Link>
+
       <div className="space-y-4">
         <div className="flex justify-between items-end">
           <div>
             <h1 className="text-3xl font-serif font-bold text-[#2D241E]">Active Enquiries</h1>
             <p className="text-[#8C7B6C] text-sm">Real-time feed of open cases across all SRMs</p>
           </div>
-          {/* --- ADD ENQUIRY BUTTON --- */}
           <button 
             onClick={() => setIsModalOpen(true)}
             className="flex items-center gap-2 bg-[#C5A880] hover:bg-[#B89A72] text-white px-5 py-2.5 rounded-xl font-bold text-sm shadow-lg shadow-[#C5A880]/20 transition-all active:scale-95"
@@ -553,7 +553,6 @@ export default function AdminEnquiriesPage() {
         />
       )}
 
-      {/* --- ADMIN ADD ENQUIRY MODAL --- */}
       {isModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-[#FDFDFD] w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden border border-[#E8E0D5]">
@@ -566,8 +565,6 @@ export default function AdminEnquiriesPage() {
                   </div>
 
                   <div className="p-6 space-y-6 overflow-y-auto">
-                      
-                      {/* Section 1: Basic Info */}
                       <div className="space-y-4">
                           <div>
                               <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Student Name</label>
@@ -601,7 +598,6 @@ export default function AdminEnquiriesPage() {
                           </div>
                       </div>
 
-                      {/* Section 2: Assignment & Status */}
                       <div className="bg-[#F5F0EB] p-5 rounded-2xl space-y-4 border border-[#E8E0D5]">
                           <div className="grid grid-cols-2 gap-4">
                               <div>
@@ -637,7 +633,6 @@ export default function AdminEnquiriesPage() {
                           </div>
                       </div>
 
-                      {/* Section 3: Next Steps */}
                       <div className="grid grid-cols-2 gap-4">
                           <div>
                               <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Next Action</label>
@@ -663,7 +658,6 @@ export default function AdminEnquiriesPage() {
                       </div>
                   </div>
 
-                  {/* Footer Buttons */}
                   <div className="mt-6 flex gap-3 pt-4 border-t border-[#E8E0D5] shrink-0 p-6 bg-white">
                       <button 
                           onClick={handleCancel}

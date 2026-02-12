@@ -10,7 +10,8 @@ import {
   X, 
   Save, 
   AlertCircle,
-  LogOut
+  LogOut,
+  Bell
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
@@ -20,7 +21,8 @@ import {
     query, 
     where, 
     getCountFromServer,
-    writeBatch
+    writeBatch,
+    onSnapshot // Added for real-time listener
 } from "firebase/firestore";
 import { useAuth } from "@/lib/useAuth";
 import { getAuth, signOut } from "firebase/auth";
@@ -38,13 +40,16 @@ const STATUSES = [
 ];
 
 export default function SRMDashboard() {
-  const { appUser, loading } = useAuth(); // Added loading
+  const { appUser, loading } = useAuth();
   const router = useRouter();
   
   // UI State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cancelStage, setCancelStage] = useState<0 | 1>(0);
+
+  // --- 🔔 NOTIFICATION STATE ---
+  const [hasUnread, setHasUnread] = useState(false);
 
   // Form State
   const initialForm = {
@@ -62,22 +67,35 @@ export default function SRMDashboard() {
   // --- 🛡️ THE BOUNCER (Security Check) ---
   useEffect(() => {
     if (loading) return;
-
-    // 1. If not logged in, kick to login
     if (!appUser) {
       router.replace("/login");
       return;
     }
-
     const role = appUser.role ? appUser.role.toUpperCase() : "";
-    // 2. If logged in as ADMIN, kick to Admin Dashboard
     if (appUser.role === "ADMIN") {
       router.replace("/admin"); 
       return;
     }
   }, [appUser, loading, router]);
 
-  // --- Handlers ---
+  // --- 🔔 REAL-TIME UNREAD CHECK ---
+  useEffect(() => {
+    if (!appUser?.srmId) return;
+
+    // Listen for notifications for this specific SRM that are NOT read
+    // Also ensuring we only count incoming messages (not outgoing ones sent by the SRM)
+    const q = query(
+      collection(db, "srm_notifications"),
+      where("srmId", "==", appUser.srmId),
+      where("read", "==", false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setHasUnread(!snapshot.empty);
+    });
+
+    return () => unsubscribe();
+  }, [appUser]);
 
   const handleLogout = async () => {
       await signOut(getAuth());
@@ -107,7 +125,6 @@ export default function SRMDashboard() {
           const startOfDay = new Date(now.setHours(0, 0, 0, 0));
           const endOfDay = new Date(now.setHours(23, 59, 59, 999));
           
-          // Generate Q-ID based on today's count
           const q = query(
               collection(db, "enquiries"),
               where("createdAt", ">=", Timestamp.fromDate(startOfDay)),
@@ -129,7 +146,6 @@ export default function SRMDashboard() {
               enqId: enqId,
               status: form.status,
               lastAction: form.action,
-              // --- CHANGE HERE: Set to null so it shows up in "Cards" today ---
               lastActionDate: null, 
               lastRemark: form.remark,
               nextAction: form.nextAction || "Follow up",
@@ -172,36 +188,48 @@ export default function SRMDashboard() {
       { label: "Data", icon: Database, href: "/srm/data" },
   ];
 
-  // Prevent flash of content while checking role
   if (loading || !appUser || appUser.role === "ADMIN") {
       return <div className="min-h-screen flex items-center justify-center bg-gray-50 text-[#8C7B6C] animate-pulse">Loading...</div>;
   }
 
   return (
-    <div className="h-full flex flex-col p-6 max-w-5xl mx-auto">
+    <div className="h-full flex flex-col p-6 max-w-5xl mx-auto space-y-10">
         
-        {/* 1. Header with Logout */}
-        <div className="mb-10 mt-4 flex justify-between items-end">
+        {/* 1. Header with Notifications & Logout */}
+        <div className="mt-4 flex justify-between items-end">
             <div>
                 <h2 className="text-3xl font-serif font-bold text-[#2D241E]">
                     Welcome back, {appUser?.name?.split(" ")[0]}
                 </h2>
                 <p className="text-[#8C7B6C] mt-1">Ready to connect with your students today?</p>
             </div>
-            <button 
-                onClick={handleLogout}
-                className="flex items-center gap-2 text-[#8C7B6C] hover:text-[#D96C6C] transition-colors font-bold text-xs uppercase tracking-wider mb-1"
-            >
-                <LogOut size={16} /> Sign Out
-            </button>
+            
+            <div className="flex items-center gap-6 mb-1">
+                {/* Notifications Icon with Red Dot */}
+                <Link 
+                    href="/srm/notifications" 
+                    className="p-2 text-[#8C7B6C] hover:text-[#C5A880] transition-colors relative group"
+                >
+                    <Bell size={24} className="group-hover:scale-110 transition-transform" />
+                    {hasUnread && (
+                      <span className="absolute top-1.5 right-2 w-2.5 h-2.5 bg-red-500 border-2 border-[#F5F0EB] rounded-full animate-pulse shadow-sm" />
+                    )}
+                </Link>
+
+                <button 
+                    onClick={handleLogout}
+                    className="flex items-center gap-2 text-[#8C7B6C] hover:text-[#D96C6C] transition-colors font-bold text-xs uppercase tracking-wider"
+                >
+                    <LogOut size={16} /> Sign Out
+                </button>
+            </div>
         </div>
 
-        {/* 2. The Grid (No Notification Badge) */}
+        {/* 2. The Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
             {menuItems.map((item, idx) => {
                 const CardContent = (
                     <div className="bg-[#C5A880] hover:bg-[#B89A72] active:scale-95 transition-all duration-300 aspect-square rounded-sm shadow-sm flex flex-col items-center justify-center gap-3 relative group cursor-pointer">
-                        {/* Icon & Text */}
                         <div className="text-white opacity-90 group-hover:scale-110 transition-transform duration-300">
                             <item.icon size={32} strokeWidth={1.5} />
                         </div>
@@ -227,7 +255,6 @@ export default function SRMDashboard() {
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-[#FDFDFD] w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden">
-                    
                     <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white">
                         <h2 className="text-xl font-serif font-bold text-[#2D241E]">New Enquiry</h2>
                         <button onClick={handleCancel} className="p-2 hover:bg-[#F5F0EB] text-[#8C7B6C] rounded-full transition-colors">
@@ -236,8 +263,6 @@ export default function SRMDashboard() {
                     </div>
 
                     <div className="p-6 space-y-6 overflow-y-auto">
-                        
-                        {/* Section 1: Basic Info */}
                         <div className="space-y-4">
                             <div>
                                 <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Student Name</label>
@@ -271,7 +296,6 @@ export default function SRMDashboard() {
                             </div>
                         </div>
 
-                        {/* Section 2: Actions & Status */}
                         <div className="bg-[#F5F0EB] p-5 rounded-2xl space-y-4 border border-[#E8E0D5]">
                             <div className="flex gap-4">
                                 <div className="flex-1">
@@ -306,7 +330,6 @@ export default function SRMDashboard() {
                             </div>
                         </div>
 
-                        {/* Section 3: Next Steps */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1">Next Action</label>
@@ -332,7 +355,6 @@ export default function SRMDashboard() {
                         </div>
                     </div>
 
-                    {/* Footer Buttons */}
                     <div className="mt-6 flex gap-3 pt-4 border-t border-[#E8E0D5] shrink-0 p-6 bg-white">
                         <button 
                             onClick={handleCancel}
@@ -343,7 +365,6 @@ export default function SRMDashboard() {
                         >
                             {cancelStage === 1 ? <><AlertCircle size={16} /> Discard?</> : "Cancel"}
                         </button>
-                        
                         <button 
                             onClick={handleSaveEnquiry}
                             disabled={saving}
@@ -352,11 +373,9 @@ export default function SRMDashboard() {
                             {saving ? "Saving..." : <><Save size={18} /> Save Enquiry</>}
                         </button>
                     </div>
-
                 </div>
             </div>
         )}
-
     </div>
   );
 }

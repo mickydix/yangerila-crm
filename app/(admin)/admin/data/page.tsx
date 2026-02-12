@@ -12,12 +12,14 @@ import {
   ListFilter,
   Eye,
   Check,
-  ChevronDown
+  ChevronDown,
+  ArrowLeft // Added for back button
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { collection, query, getDocs, orderBy, where, Timestamp } from "firebase/firestore";
 import { format, startOfMonth, endOfMonth, parse } from "date-fns";
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
+import Link from "next/link"; // Added for back button
 
 // --- FIXED TYPE DEFINITION ---
 type Enquiry = {
@@ -167,6 +169,14 @@ export default function AdminDataPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
+        {/* --- BACK BUTTON --- */}
+        <Link 
+          href="/admin" 
+          className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"
+        >
+          <ArrowLeft size={16} /> Back to Dashboard
+        </Link>
+
         <div className="space-y-4">
             <h1 className="text-3xl font-serif font-bold text-[#2D241E]">Archived Data</h1>
             
