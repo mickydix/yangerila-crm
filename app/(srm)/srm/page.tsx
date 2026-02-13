@@ -22,7 +22,7 @@ import {
     where, 
     getCountFromServer,
     writeBatch,
-    onSnapshot // Added for real-time listener
+    onSnapshot 
 } from "firebase/firestore";
 import { useAuth } from "@/lib/useAuth";
 import { getAuth, signOut } from "firebase/auth";
@@ -82,8 +82,6 @@ export default function SRMDashboard() {
   useEffect(() => {
     if (!appUser?.srmId) return;
 
-    // Listen for notifications for this specific SRM that are NOT read
-    // Also ensuring we only count incoming messages (not outgoing ones sent by the SRM)
     const q = query(
       collection(db, "srm_notifications"),
       where("srmId", "==", appUser.srmId),
@@ -155,8 +153,10 @@ export default function SRMDashboard() {
               createdAt: Timestamp.now(),
           };
 
+          // 1. Write the Enquiry
           batch.set(newEnqRef, parentData);
 
+          // 2. Write the Timeline Entry
           const timelineRef = doc(collection(db, "enquiries", newEnqRef.id, "timeline"));
           batch.set(timelineRef, {
               action: form.action,
@@ -166,12 +166,26 @@ export default function SRMDashboard() {
               by: appUser?.name || "SRM"
           });
 
+          // 3. Write System Notification to Admin
+          const adminNoteRef = doc(collection(db, "admin_notifications"));
+          
+          batch.set(adminNoteRef, {
+            srmId: appUser?.srmId || "Unknown",
+            srmName: appUser?.name || "SRM",
+            enquiryId: newEnqRef.id, 
+            enquiryName: form.name,
+            type: "system",
+            status: form.status, // Field for color coding logic
+            message: `${appUser?.name} created a new enquiry. Remark - "${form.remark || 'No remark added'}"`,
+            createdAt: Timestamp.now(),
+            read: false
+          });
+
           await batch.commit();
 
           setIsModalOpen(false);
           setForm(initialForm);
           setCancelStage(0);
-          alert(`Enquiry Created Successfully!\nID: ${enqId}`);
 
       } catch (e) {
           console.error(e);
@@ -195,7 +209,7 @@ export default function SRMDashboard() {
   return (
     <div className="h-full flex flex-col p-6 max-w-5xl mx-auto space-y-10">
         
-        {/* 1. Header with Notifications & Logout */}
+        {/* Header */}
         <div className="mt-4 flex justify-between items-end">
             <div>
                 <h2 className="text-3xl font-serif font-bold text-[#2D241E]">
@@ -225,7 +239,7 @@ export default function SRMDashboard() {
             </div>
         </div>
 
-        {/* 2. The Grid */}
+        {/* Tiles */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full">
             {menuItems.map((item, idx) => {
                 const CardContent = (
@@ -251,7 +265,7 @@ export default function SRMDashboard() {
             })}
         </div>
 
-        {/* --- NEW ENQUIRY MODAL --- */}
+        {/* Modal */}
         {isModalOpen && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
                 <div className="bg-[#FDFDFD] w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden">

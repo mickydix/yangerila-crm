@@ -46,6 +46,32 @@ export default function AdminNotificationsPage() {
   const [messageText, setMessageText] = useState("");
   const [sending, setSending] = useState(false);
 
+  // --- 🎨 COLOR LOGIC HELPER ---
+  const getNoteStyles = (note: any, isOutgoing: boolean) => {
+    if (isOutgoing) return "bg-[#2D241E] text-white border-[#2D241E]";
+    
+    // Only apply status colors to system-generated notifications
+    if (note.type === "system") {
+      switch (note.status) {
+        case "CALL_AGAIN":
+          return "bg-[#faf0d4] border-[#FDE047] text-[#854D0E]"; // Light Mustard
+        case "READY_DEMO":
+          return "bg-[#E0F2FE] border-[#BAE6FD] text-[#075985]"; // Light Blue
+        case "DEMO_TAKEN":
+          return "bg-[#F5F3FF] border-[#DDD6FE] text-[#5B21B6]"; // Light Violet
+        case "READY_ADMISSION":
+          return "bg-[#DCFCE7] border-[#BBF7D0] text-[#166534]"; // Light Green
+        case "NOT_JOINING":
+          return "bg-[#FFF1F2] border-[#FECDD3] text-[#9F1239]"; // ✨ Added: Light Red
+          default:
+          return "bg-white text-[#4A4036] border-[#E8E0D5]";
+      }
+    }
+
+    // Default for regular chat messages from SRM
+    return "bg-white text-[#4A4036] border-[#E8E0D5]";
+  };
+
   // --- 🛡️ THE BOUNCER ---
   useEffect(() => {
     if (loading) return;
@@ -87,7 +113,6 @@ export default function AdminNotificationsPage() {
       const q = query(
         collection(db, "enquiries"), 
         where("srmId", "==", selectedSrm),
-        // Filter out completed/closed statuses
         where("status", "not-in", ["JOINED", "NOT_JOINING"])
       );
       const snap = await getDocs(q);
@@ -101,7 +126,6 @@ export default function AdminNotificationsPage() {
   }, [selectedSrm]);
 
   const handleMarkAllRead = async () => {
-    // Only mark incoming messages (not outgoing) that are currently unread
     const unread = notifications.filter(n => !n.read && n.direction !== "outgoing");
     if (unread.length === 0) return;
 
@@ -131,7 +155,6 @@ export default function AdminNotificationsPage() {
         alert("Enquiry details not found.");
       }
 
-      // Also mark this specific notification as read if it isn't already
       if (!note.read && note.direction !== "outgoing") {
         await writeBatch(db).update(doc(db, "admin_notifications", note.id), { read: true }).commit();
       }
@@ -149,7 +172,6 @@ export default function AdminNotificationsPage() {
       const selectedSrmData = srms.find(s => s.id === selectedSrm);
       const batch = writeBatch(db);
 
-      // Write 1: To srm_notifications
       const srmNoteRef = doc(collection(db, "srm_notifications"));
       batch.set(srmNoteRef, {
         srmId: selectedSrm,
@@ -162,7 +184,6 @@ export default function AdminNotificationsPage() {
         read: false
       });
 
-      // Write 2: To admin_notifications
       const adminNoteRef = doc(collection(db, "admin_notifications"));
       batch.set(adminNoteRef, {
         srmId: selectedSrm,
@@ -173,14 +194,12 @@ export default function AdminNotificationsPage() {
         message: messageText,
         direction: "outgoing",
         createdAt: Timestamp.now(),
-        read: true // Sent messages are read by the sender
+        read: true 
       });
 
       await batch.commit();
-
       setMessageText("");
       setSelectedEnquiry("");
-      // CONFIRMATION POPUP REMOVED AS REQUESTED
     } catch (e) {
       console.error(e);
       alert("Failed to send");
@@ -194,7 +213,6 @@ export default function AdminNotificationsPage() {
   return (
     <div className="h-screen flex flex-col p-4 max-w-5xl mx-auto space-y-6">
       
-      {/* Header with Back Button and Mark Read */}
       <div className="flex items-center justify-between border-b border-[#E8E0D5] pb-4 mt-2">
         <div className="flex items-center gap-4">
           <Link href="/admin" className="p-2 hover:bg-white rounded-full text-[#8C7B6C] transition-colors">
@@ -202,19 +220,18 @@ export default function AdminNotificationsPage() {
           </Link>
           <div className="flex items-center gap-2">
               <Bell size={24} className="text-[#C5A880]" />
-              <h1 className="text-2xl font-serif font-bold text-[#2D241E]">SRM Notifications</h1>
+              <h1 className="text-2xl font-serif font-bold text-[#2D241E]">Notifications</h1>
           </div>
         </div>
 
         <button 
           onClick={handleMarkAllRead}
-          className="flex items-center gap-2 text-xs font-bold text-[#C5A880] hover:text-[#2D241E] transition-colors uppercase tracking-widest bg-white border border-[#E8E0D5] px-4 py-2 rounded-xl shadow-sm"
+          className="flex items-center gap-2 text-xs font-bold text-[#8C7B6C] hover:text-[#2D241E] transition-colors uppercase tracking-widest bg-white border border-[#E8E0D5] px-4 py-2 rounded-xl shadow-sm"
         >
           <CheckCheck size={16} /> Mark all Read
         </button>
       </div>
 
-      {/* Main Notification Box */}
       <div className="flex-1 bg-white border border-[#E8E0D5] rounded-3xl shadow-sm flex flex-col overflow-hidden mb-4">
         
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-[#FAFAFA]">
@@ -234,12 +251,12 @@ export default function AdminNotificationsPage() {
                 >
                   <div 
                     className={`p-5 rounded-2xl border shadow-sm max-w-[85%] md:max-w-[70%] transition-all relative
-                      ${isOutgoing ? 'bg-[#2D241E] text-white border-[#2D241E]' : 'bg-white text-[#4A4036] border-[#E8E0D5]'}
-                      ${!isOutgoing && !note.read ? 'border-[#C5A880] ring-1 ring-[#C5A880]/20' : ''}
-                      ${note.enquiryId ? 'cursor-pointer hover:shadow-md' : ''}`}
+                      ${getNoteStyles(note, isOutgoing)}
+                      ${!isOutgoing && !note.read ? 'ring-1 ring-[#C5A880]/40 shadow-md' : ''}
+                      ${note.enquiryId ? 'cursor-pointer hover:scale-[1.01]' : ''}`}
                   >
                     {!isOutgoing && !note.read && (
-                      <div className="absolute top-3 right-3 w-2 h-2 bg-[#C5A880] rounded-full animate-pulse" />
+                      <div className="absolute top-3 right-3 w-2 h-2 bg-red-400 rounded-full animate-pulse" />
                     )}
 
                     <div className="flex justify-between items-start mb-2 gap-4">
@@ -250,10 +267,10 @@ export default function AdminNotificationsPage() {
                         {note.createdAt ? format(note.createdAt.toDate(), "hh:mm a, dd MMM") : ""}
                       </span>
                     </div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{note.message}</p>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{note.message}</p>
                     {note.enquiryName && (
                       <div className={`mt-3 text-[10px] font-bold px-2 py-1 rounded inline-flex items-center gap-1 border 
-                        ${isOutgoing ? 'bg-white/10 border-white/20 text-white' : 'bg-[#F5F0EB] border-[#E8E0D5] text-[#8C7B6C]'}`}>
+                        ${isOutgoing ? 'bg-white/10 border-white/20 text-white' : 'bg-black/5 border-black/10 text-[#8C7B6C]'}`}>
                         <User size={10} /> Enquiry: {note.enquiryName}
                       </div>
                     )}
@@ -264,7 +281,6 @@ export default function AdminNotificationsPage() {
           )}
         </div>
 
-        {/* Bottom Input Section */}
         <div className="p-6 border-t border-[#E8E0D5] bg-white space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-1">
@@ -311,7 +327,6 @@ export default function AdminNotificationsPage() {
         </div>
       </div>
 
-      {/* Enquiry Action Popup */}
       {selectedEnquiryForPopup && (
         <EnquiryActionCard 
           enquiry={selectedEnquiryForPopup}

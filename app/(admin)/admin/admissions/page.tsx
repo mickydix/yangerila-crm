@@ -1,19 +1,21 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Check, Calendar, ArrowLeft } from "lucide-react"; // Added ArrowLeft
+import { Check, Calendar, ArrowLeft } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
-  collection, 
-  query, 
-  orderBy, 
-  getDocs, 
-  doc, 
-  writeBatch,
-  Timestamp,
-  where
+    collection, 
+    query, 
+    orderBy, 
+    getDocs, 
+    doc, 
+    getDoc, // Added getDoc
+    writeBatch,
+    Timestamp,
+    where
 } from "firebase/firestore";
-import Link from "next/link"; // Added Link
+import Link from "next/link";
+import { useAuth } from "@/lib/useAuth"; // Added useAuth
 
 type Student = {
   id: string;
@@ -25,6 +27,7 @@ type Student = {
 };
 
 export default function AdmissionsPage() {
+  const { appUser } = useAuth(); // To get Admin name for notification
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -32,7 +35,6 @@ export default function AdmissionsPage() {
   useEffect(() => {
     const fetchStudents = async () => {
       try {
-        // Query: Only fetch "NEW" (Pending) students
         const q = query(
             collection(db, "students"), 
             where("status", "==", "NEW"),
@@ -57,24 +59,49 @@ export default function AdmissionsPage() {
     try {
       const batch = writeBatch(db);
 
-      // 1. Update Student Status to ACTIVE
+      // --- 🔔 PREPARE NOTIFICATION DATA ---
+      let targetSrmId = "";
+      if (student.enquiryId) {
+        const enqRef = doc(db, "enquiries", student.enquiryId);
+        const enqSnap = await getDoc(enqRef);
+        
+        if (enqSnap.exists()) {
+          const enqData = enqSnap.data();
+          targetSrmId = enqData.srmId;
+
+          // 1. Update Original Enquiry to JOINED
+          batch.update(enqRef, { 
+              status: "JOINED",
+              lastAction: "Admin Confirmed",
+              lastActionDate: Timestamp.now(),
+              lastRemark: "Joined the Academy (Admin Confirmed)."
+          });
+
+          // 2. Create Celebration Notification for SRM 🔔
+          if (targetSrmId) {
+            const srmNoteRef = doc(collection(db, "srm_notifications"));
+            batch.set(srmNoteRef, {
+                srmId: targetSrmId,
+                enquiryId: student.enquiryId,
+                enquiryName: student.name,
+                fromName: appUser?.name || "Admin",
+                type: "system",
+                status: "JOINED",
+                message: `Congrats! Your Enquiry "${student.name}" has taken admission!`,
+                createdAt: Timestamp.now(),
+                read: false
+            });
+          }
+        }
+      }
+
+      // 3. Update Student Status to ACTIVE
       const studentRef = doc(db, "students", student.id);
       batch.update(studentRef, { status: "ACTIVE" });
 
-      // 2. Update Original Enquiry to JOINED
-      if (student.enquiryId) {
-        const enqRef = doc(db, "enquiries", student.enquiryId);
-        batch.update(enqRef, { 
-            status: "JOINED",
-            lastAction: "Admin Confirmed",
-            lastActionDate: Timestamp.now(),
-            lastRemark: "Joined the Academy (Admin Confirmed)."
-        });
-      }
-
       await batch.commit();
 
-      // REMOVE from list immediately to reflect that they are moved to Data
+      // REMOVE from list immediately
       setStudents(prev => prev.filter(s => s.id !== student.id));
 
     } catch (e) {
@@ -96,7 +123,6 @@ export default function AdmissionsPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6 p-4">
-      {/* --- BACK BUTTON --- */}
       <Link 
         href="/admin" 
         className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"

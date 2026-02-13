@@ -15,27 +15,28 @@ import {
   X,
   AlertCircle,
   Save,
-  ArrowLeft, // Added for back button
+  ArrowLeft,
   ListFilter
 } from "lucide-react";
 import { db } from "@/lib/firebase";
 import { 
-  collection, 
-  query, 
-  orderBy, 
-  getDocs, 
-  where,
-  limit,
-  Timestamp,
-  doc,
-  getCountFromServer,
-  writeBatch
+    collection, 
+    query, 
+    orderBy, 
+    getDocs, 
+    where,
+    limit,
+    Timestamp,
+    doc,
+    getCountFromServer,
+    writeBatch
 } from "firebase/firestore";
 import { format, startOfMonth, endOfMonth, parse } from "date-fns";
 import EnquiryActionCard from "@/components/EnquiryActionCard"; 
 import { useAuth } from "@/lib/useAuth";
-import Link from "next/link"; // Added for back button
+import Link from "next/link";
 
+// ... [Existing types and constants remain unchanged] ...
 type Enquiry = {
   id: string;
   name: string;
@@ -66,7 +67,6 @@ const ADMIN_STATUS_CONFIG = [
 ];
 
 const SOURCES = ["Instagram", "Facebook", "Referral", "Google", "Walk-in", "Justdial", "Other"];
-const ACTIONS = ["Called", "Sent Message"];
 const STATUSES = [
     { label: "Follow Up", value: "CALL_AGAIN" },
     { label: "Ready for Demo", value: "READY_DEMO" },
@@ -92,7 +92,7 @@ export default function AdminEnquiriesPage() {
       source: SOURCES[0],
       action: "Called",
       remark: "",
-      status: "CALL_AGAIN",
+      status: "CALL_AGAIN" as const,
       nextAction: "",
       nextActionDate: "",
       assignedSRMId: ""
@@ -103,9 +103,6 @@ export default function AdminEnquiriesPage() {
   const [activeFilter, setActiveFilter] = useState<string>("ALL");
   const [activeSRM, setActiveSRM] = useState<string>("ALL"); 
   
-  const [sortBy, setSortBy] = useState<"createdAt">("createdAt");
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
-
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [isAllTime, setIsAllTime] = useState(false);
 
@@ -255,8 +252,10 @@ export default function AdminEnquiriesPage() {
               createdAt: Timestamp.now(),
           };
 
+          // 1. Create Enquiry
           batch.set(newEnqRef, parentData);
 
+          // 2. Create Timeline
           const timelineRef = doc(collection(db, "enquiries", newEnqRef.id, "timeline"));
           batch.set(timelineRef, {
               action: form.action,
@@ -264,6 +263,20 @@ export default function AdminEnquiriesPage() {
               date: Timestamp.now(),
               status: form.status,
               by: `Admin (${appUser?.name || "Admin"})`
+          });
+
+          // 3. Create SRM Notification 🔔
+          const srmNotificationRef = doc(collection(db, "srm_notifications"));
+          batch.set(srmNotificationRef, {
+              srmId: form.assignedSRMId,
+              enquiryId: newEnqRef.id,
+              enquiryName: form.name,
+              fromName: appUser?.name || "Admin",
+              type: "system",
+              status: form.status, // Required for color coding in SRM panel
+              message: `${appUser?.name || "Admin"} allotted you a new Enquiry - "${form.name}"`,
+              createdAt: Timestamp.now(),
+              read: false
           });
 
           await batch.commit();
@@ -306,7 +319,6 @@ export default function AdminEnquiriesPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 p-4">
-      {/* --- BACK BUTTON --- */}
       <Link 
         href="/admin" 
         className="inline-flex items-center gap-2 text-[#8C7B6C] hover:text-[#2D241E] transition-colors font-bold text-xs uppercase tracking-widest mb-2"
@@ -373,6 +385,7 @@ export default function AdminEnquiriesPage() {
             </div>
         </div>
 
+        {/* ... [Rest of the filtering UI remains exactly same] ... */}
         <div className="flex flex-wrap gap-3">
             <div className="relative inline-block text-left" ref={statusMenuRef}>
                 <button 
@@ -404,7 +417,7 @@ export default function AdminEnquiriesPage() {
                     </div>
                 )}
             </div>
-
+            {/* SRM and Date filters code remains unchanged */}
             <div className="relative inline-block text-left" ref={srmMenuRef}>
                 <button 
                     onClick={() => setShowSRMMenu(!showSRMMenu)}
@@ -556,7 +569,6 @@ export default function AdminEnquiriesPage() {
       {isModalOpen && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#2D241E]/40 backdrop-blur-sm p-4 animate-in fade-in">
               <div className="bg-[#FDFDFD] w-full max-w-lg rounded-xl shadow-2xl animate-in zoom-in-95 flex flex-col max-h-[90vh] overflow-hidden border border-[#E8E0D5]">
-                  
                   <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-white">
                       <h2 className="text-xl font-serif font-bold text-[#2D241E]">Admin: Add & Assign Lead</h2>
                       <button onClick={handleCancel} className="p-2 hover:bg-[#F5F0EB] text-[#8C7B6C] rounded-full transition-colors">
@@ -677,11 +689,9 @@ export default function AdminEnquiriesPage() {
                           {saving ? "Saving..." : <><Save size={18} /> Save & Assign</>}
                       </button>
                   </div>
-
               </div>
           </div>
       )}
-
     </div>
   );
 }

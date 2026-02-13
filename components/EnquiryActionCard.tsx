@@ -47,6 +47,7 @@ type Enquiry = {
   nextActionDate: any;
   linkSent?: boolean;
   srmName?: string; 
+  srmId?: string; // Ensure srmId is available
 };
 
 type HistoryItem = {
@@ -60,10 +61,10 @@ type HistoryItem = {
 
 // --- Config (Earth Tones) ---
 const STATUS_CONFIG = [
-    { label: "Follow Up", value: "CALL_AGAIN", headerBg: "bg-[#C5A880]", light: "bg-[#F5F0EB] text-[#8C7B6C]", border: "border-[#E8E0D5]", dot: "bg-[#C5A880]" },
-    { label: "Ready for Demo", value: "READY_DEMO", headerBg: "bg-[#8C7B6C]", light: "bg-[#F5F0EB] text-[#8C7B6C]", border: "border-[#E8E0D5]", dot: "bg-[#8C7B6C]" },
-    { label: "Demo Taken", value: "DEMO_TAKEN", headerBg: "bg-[#6B5B50]", light: "bg-[#F5F0EB] text-[#6B5B50]", border: "border-[#E8E0D5]", dot: "bg-[#6B5B50]" },
-    { label: "Ready for Admission", value: "READY_ADMISSION", headerBg: "bg-[#7D9D75]", light: "bg-[#EFF5EC] text-[#5D7352]", border: "border-[#CAD9C3]", dot: "bg-[#7D9D75]" },
+    { label: "Follow Up", value: "CALL_AGAIN", headerBg: "bg-[#C5A880]", light: "bg-[#FEF9C3] text-[#854D0E]", border: "border-[#FDE047]", dot: "bg-[#C5A880]" },
+    { label: "Ready for Demo", value: "READY_DEMO", headerBg: "bg-[#8C7B6C]", light: "bg-[#E0F2FE] text-[#075985]", border: "border-[#BAE6FD]", dot: "bg-[#8C7B6C]" },
+    { label: "Demo Taken", value: "DEMO_TAKEN", headerBg: "bg-[#6B5B50]", light: "bg-[#F5F3FF] text-[#5B21B6]", border: "border-[#DDD6FE]", dot: "bg-[#6B5B50]" },
+    { label: "Ready for Admission", value: "READY_ADMISSION", headerBg: "bg-[#7D9D75]", light: "bg-[#DCFCE7] text-[#166534]", border: "border-[#BBF7D0]", dot: "bg-[#7D9D75]" },
     { label: "Joined", value: "JOINED", headerBg: "bg-[#2D241E]", light: "bg-[#E8F2F2] text-[#2D241E]", border: "border-[#2D241E]", dot: "bg-[#2D241E]" },
     { label: "Not Joining", value: "NOT_JOINING", headerBg: "bg-[#9E9085]", light: "bg-[#F0EBE8] text-[#70645C]", border: "border-[#D6CCC6]", dot: "bg-[#9E9085]" },
 ];
@@ -189,7 +190,7 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                 linkSentUpdate = false;
             }
 
-            // --- 4. Handle Admission Logic (STRICT ORIGINAL LOGIC PRESERVED) ---
+            // --- 4. Handle Admission Logic ---
             if (formStatus === "READY_ADMISSION") {
                 nextActionText = "Onboard Student"; 
                 
@@ -223,7 +224,8 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                         enquiryId: enquiry.id 
                     };
 
-                    await addDoc(collection(db, "students"), newStudentData);
+                    const studentRef = doc(collection(db, "students"));
+                    batch.set(studentRef, newStudentData);
                     
                     finalRemark = formRemark ? `${formRemark} (Pending admission)` : "Pending admission";
                     linkSentUpdate = true;
@@ -258,11 +260,63 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                 meta: formEmail || null
             });
 
+            // --- 🔔 5. SYSTEM NOTIFICATION TRIGGER ---
+            const userRole = appUser?.role?.toUpperCase();
+            
+            if (userRole === "ADMIN") {
+                if (enquiry.srmId) {
+                    const srmNoteRef = doc(collection(db, "srm_notifications"));
+                    
+                    // --- Build Dynamic Admin -> SRM Message ---
+                    let adminToSrmMsg = "";
+                    if (formStatus === "JOINED") {
+                        adminToSrmMsg = `Congrats! Your Enquiry "${enquiry.name}" has taken admission!`;
+                    } else {
+                        adminToSrmMsg = `${appUser?.name || "Admin"} updated enquiry "${enquiry.name}"\nRemark - "${formRemark || 'No remark'}"`;
+                    }
+
+                    batch.set(srmNoteRef, {
+                        srmId: enquiry.srmId,
+                        enquiryId: enquiry.id,
+                        enquiryName: enquiry.name,
+                        fromName: appUser?.name || "Admin",
+                        type: "system",
+                        status: formStatus,
+                        message: adminToSrmMsg,
+                        createdAt: now,
+                        read: false
+                    });
+                }
+            } else if (userRole === "SRM") {
+                const adminNoteRef = doc(collection(db, "admin_notifications"));
+                
+                let srmToAdminMsg = `${appUser?.name || "SRM"} updated enquiry "${enquiry.name}"`;
+                if (formStatus === "READY_DEMO" && formNextDate) {
+                    srmToAdminMsg += `\nDemo class on ${format(new Date(formNextDate), "dd MMM yyyy")}`;
+                } else if (formStatus === "READY_ADMISSION") {
+                    srmToAdminMsg += `\nJoining link sent. Check admissions page`;
+                } else if (formStatus === "NOT_JOINING") {
+                    srmToAdminMsg += `\nNot joining. Intent - ${formIntentLevel}`;
+                }
+
+                batch.set(adminNoteRef, {
+                    srmId: appUser?.srmId || "Unknown",
+                    srmName: appUser?.name || "SRM",
+                    enquiryId: enquiry.id,
+                    enquiryName: enquiry.name,
+                    type: "system",
+                    status: formStatus,
+                    message: srmToAdminMsg,
+                    createdAt: now,
+                    read: false
+                });
+            }
+
             await batch.commit();
             onUpdate({ ...enquiry, ...updateData });
             onClose();
 
-            if (formStatus === "READY_ADMISSION" && !enquiry.linkSent) {
+            if (formStatus === "READY_ADMISSION" && !enquiry.linkSent && formLinkSent) {
                 alert("Invitation Sent & Student Created Successfully!");
             }
 
@@ -296,7 +350,7 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
         <div className={wrapperClasses}>
             <div className={cardClasses}>
                 
-                {/* 1. Header */}
+                {/* Header */}
                 <div className={`${getCardConfig(enquiry.status).headerBg} px-6 py-5 flex justify-between items-center text-white shadow-sm shrink-0 transition-colors duration-300`}>
                     <div className="flex items-center gap-2">
                         {showHistory ? (
@@ -320,7 +374,7 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                     </button>
                 </div>
 
-                {/* 2. Body */}
+                {/* Body */}
                 <div className="px-6 py-6 space-y-6 overflow-y-auto flex-1 bg-[#FDFDFD]">
                     
                     {showHistory ? (
@@ -351,7 +405,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                         </div>
                     ) : (
                     <>
-                        {/* Static Info */}
                         <div className="flex justify-between items-start">
                             <div>
                                 <h2 className="text-2xl font-serif font-bold text-[#2D241E] leading-tight">{enquiry.name}</h2>
@@ -360,7 +413,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                             <span className="text-xs font-bold text-[#8C7B6C] uppercase bg-[#F5F0EB] px-2 py-1 rounded border border-[#E8E0D5]">{getEnquiryAge(enquiry.createdAt)}d Old</span>
                         </div>
 
-                        {/* Last Action Box */}
                         <div className="bg-[#F9F7F5] rounded-xl p-4 border border-[#E8E0D5]">
                             <div className="flex items-center gap-2 text-xs font-bold text-[#8C7B6C] uppercase mb-2 tracking-wider">
                                 <Clock size={14} />
@@ -371,7 +423,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                             <p className="text-[#4A4036] italic text-sm leading-snug border-l-2 border-[#C5A880] pl-3 line-clamp-3">"{enquiry.lastRemark}"</p>
                         </div>
 
-                        {/* Communication Buttons */}
                         <div className="grid grid-cols-2 gap-3">
                             <a href={`tel:${enquiry.phone}`} className="flex items-center justify-center gap-2 bg-[#2D241E] text-white py-3 rounded-xl font-bold text-sm hover:bg-[#4A4036] transition shadow-sm active:scale-95">
                                 <Phone size={16} /> Call
@@ -383,7 +434,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
 
                         <div className="border-t border-[#E8E0D5] my-1"></div>
 
-                        {/* Action Inputs */}
                         <div className="space-y-4">
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
@@ -420,30 +470,40 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                             </div>
                         </div>
 
-                        {/* --- NEXT STEP PLANNING --- */}
                         <div className="animate-in slide-in-from-top-2 duration-300">
-                            
                             {formStatus === "READY_ADMISSION" ? (
-                                <div className="space-y-1.5 bg-[#EFF5EC] p-4 rounded-xl border border-[#CAD9C3]">
-                                    <label className="flex items-start gap-3 cursor-pointer group">
-                                        <div className="relative flex items-center">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={formLinkSent}
-                                                onChange={(e) => setFormLinkSent(e.target.checked)}
-                                                className="peer w-6 h-6 border-2 border-[#8CA67E] rounded-md bg-white checked:bg-[#5D7352] checked:border-[#5D7352] appearance-none transition-all cursor-pointer"
-                                            />
-                                            <CheckCircle size={14} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" />
-                                        </div>
-                                        <div className="flex-1">
-                                            <span className="block text-sm font-bold text-[#5D7352] group-hover:text-[#4A5D41] transition-colors">
-                                                Admission & Payment Links Sent
-                                            </span>
-                                            <span className="text-xs text-[#8C7B6C]">
-                                                Check this box only after sending details.
-                                            </span>
-                                        </div>
-                                    </label>
+                                <div className="space-y-4">
+                                    <div className="space-y-1.5 bg-[#EFF5EC] p-4 rounded-xl border border-[#CAD9C3]">
+                                        <label className="flex items-start gap-3 cursor-pointer group">
+                                            <div className="relative flex items-center">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={formLinkSent}
+                                                    onChange={(e) => setFormLinkSent(e.target.checked)}
+                                                    className="peer w-6 h-6 border-2 border-[#8CA67E] rounded-md bg-white checked:bg-[#5D7352] checked:border-[#5D7352] appearance-none transition-all cursor-pointer"
+                                                />
+                                                <CheckCircle size={14} className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 pointer-events-none transition-opacity" />
+                                            </div>
+                                            <div className="flex-1">
+                                                <span className="block text-sm font-bold text-[#5D7352] group-hover:text-[#4A5D41] transition-colors">
+                                                    Admission & Payment Links Sent
+                                                </span>
+                                                <span className="text-xs text-[#8C7B6C]">
+                                                    Check this box only after sending details.
+                                                </span>
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-[#8C7B6C] uppercase mb-1.5 ml-1">Student Email (Optional)</label>
+                                        <input 
+                                            type="email"
+                                            value={formEmail}
+                                            onChange={e => setFormEmail(e.target.value)}
+                                            placeholder="rahul@example.com"
+                                            className="w-full p-3 bg-[#F5F0EB] rounded-xl text-sm text-[#4A4036] outline-none focus:ring-1 focus:ring-[#C5A880]"
+                                        />
+                                    </div>
                                 </div>
                             ) : formStatus === "NOT_JOINING" ? (
                                 <div className="space-y-1.5 bg-[#F0EBE8] p-4 rounded-xl border border-[#D6CCC6]">
@@ -467,8 +527,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                                           <CalendarDays size={14} />
                                           <span>Next Step Planning</span>
                                       </div>
-
-                                      {/* --- NEW CHECKBOX ADDED HERE --- */}
                                       <label className="flex items-center gap-2 cursor-pointer group">
                                           <input 
                                               type="checkbox"
@@ -482,7 +540,6 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                                           </span>
                                       </label>
                                     </div>
-                                    
                                     <div className="grid grid-cols-2 gap-3">
                                         <div>
                                             <select 
@@ -511,25 +568,17 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                     )}
                 </div>
 
-                {/* 3. Footer */}
+                {/* Footer */}
                 <div className="bg-white p-5 border-t border-[#E8E0D5] flex items-center justify-between gap-4 shrink-0">
                     <button onClick={handleToggleHistory} className="flex items-center gap-1.5 text-[#8C7B6C] hover:text-[#4A4036] font-bold text-xs uppercase tracking-wide transition-colors">
                         {showHistory ? <><ArrowLeft size={16} /> Back</> : <><History size={16} /> History</>}
                     </button>
-                    
                     <div className="flex items-center gap-3 ml-auto">
-                        {isInline && (
-                            <button onClick={handleCloseAttempt} className="px-4 py-2 text-[#8C7B6C] hover:bg-[#F5F0EB] rounded-lg font-bold text-xs transition-all">
-                                Skip
-                            </button>
-                        )}
-
                         {!isInline && (
                             <button onClick={handleCloseAttempt} className={`px-4 py-2 rounded-lg font-bold text-xs transition-all ${confirmClose ? "bg-red-50 text-red-600 border border-red-100" : "text-[#8C7B6C] hover:bg-[#F5F0EB]"}`}>
                                 {confirmClose ? "Discard?" : "Close"}
                             </button>
                         )}
-                        
                         <button 
                             onClick={handleSave} 
                             disabled={saving} 
