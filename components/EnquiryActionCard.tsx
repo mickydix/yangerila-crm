@@ -69,7 +69,6 @@ const STATUS_CONFIG = [
     { label: "Not Joining", value: "NOT_JOINING", headerBg: "bg-[#9E9085]", light: "bg-[#F0EBE8] text-[#70645C]", border: "border-[#D6CCC6]", dot: "bg-[#9E9085]" },
 ];
 
-const NEXT_ACTIONS = ["Call back", "Demo class date"];
 const INTENT_LEVELS = ["Low (Not Interested)", "Medium (Maybe Later)", "High (Future Prospect)"];
 
 interface Props {
@@ -100,11 +99,22 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
     const [formIntentLevel, setFormIntentLevel] = useState(INTENT_LEVELS[0]);
 
     const [formNextDate, setFormNextDate] = useState(""); 
+    const [formNextTime, setFormNextTime] = useState(""); // Added for demo time
     const [formNextAction, setFormNextAction] = useState("Call back");
     const [formEmail, setFormEmail] = useState("");
 
     // --- 🛡️ SAME AS BEFORE LOGIC ---
     const [useSameAsBefore, setUseSameAsBefore] = useState(false);
+
+    // Helper for 12-hour formatting
+    const formatTimeTo12h = (time24: string) => {
+        if (!time24) return "";
+        const [hours, minutes] = time24.split(':');
+        const h = parseInt(hours);
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const h12 = h % 12 || 12;
+        return `${h12}:${minutes} ${ampm}`;
+    };
 
     useEffect(() => {
         if (useSameAsBefore) {
@@ -112,9 +122,21 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
             if (enquiry.nextActionDate) {
                 const dateObj = enquiry.nextActionDate.toDate();
                 setFormNextDate(format(dateObj, "yyyy-MM-dd"));
+                if (enquiry.nextAction === "Demo class date") {
+                    setFormNextTime(format(dateObj, "HH:mm"));
+                }
             }
         }
     }, [useSameAsBefore, enquiry]);
+
+    // Redesign logic: Auto-update Next Action text based on status
+    useEffect(() => {
+        if (formStatus === "READY_DEMO") {
+            setFormNextAction("Demo class date");
+        } else {
+            setFormNextAction("Call back");
+        }
+    }, [formStatus]);
 
     // --- Helpers ---
     const getEnquiryAge = (createdAt: any) => createdAt ? differenceInDays(new Date(), createdAt.toDate()) : 0;
@@ -146,15 +168,20 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
         
         // Date Validation
         if (formStatus !== "NOT_JOINING" && formStatus !== "JOINED" && formStatus !== "READY_ADMISSION") {
-            if (!formNextDate) return alert("Please select a Next Action Date.");
+            if (!formNextDate) return alert("Please select a date.");
         }
 
         setSaving(true);
         try {
             const now = Timestamp.now();
-            const nextDateTs = (formStatus !== "READY_ADMISSION" && formStatus !== "JOINED" && formNextDate) 
-                ? Timestamp.fromDate(new Date(formNextDate)) 
-                : null;
+
+            // Combine Date and Optional Time
+            let combinedDate = formNextDate ? new Date(formNextDate) : null;
+            if (combinedDate && formNextTime) {
+                const [hours, mins] = formNextTime.split(":").map(Number);
+                combinedDate.setHours(hours, mins);
+            }
+            const nextDateTs = combinedDate ? Timestamp.fromDate(combinedDate) : null;
             
             const batch = writeBatch(db);
 
@@ -234,7 +261,8 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
 
             if (formNextAction === "Demo class date" && formNextDate) {
                 const prettyDate = format(new Date(formNextDate), "dd MMM yyyy");
-                finalRemark += ` (Demo Class on ${prettyDate})`;
+                const prettyTime = formNextTime ? ` at ${formatTimeTo12h(formNextTime)}` : "";
+                finalRemark += ` (Demo Class on ${prettyDate}${prettyTime})`;
             }
 
             const updateData = {
@@ -292,11 +320,14 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                 
                 let srmToAdminMsg = `${appUser?.name || "SRM"} updated enquiry "${enquiry.name}"`;
                 if (formStatus === "READY_DEMO" && formNextDate) {
-                    srmToAdminMsg += `\nDemo class on ${format(new Date(formNextDate), "dd MMM yyyy")}`;
+                    const timeStr = formNextTime ? ` at ${formatTimeTo12h(formNextTime)}` : "";
+                    srmToAdminMsg += `\nDemo class on ${format(new Date(formNextDate), "dd MMM yyyy")}${timeStr}`;
                 } else if (formStatus === "READY_ADMISSION") {
                     srmToAdminMsg += `\nJoining link sent. Check admissions page`;
                 } else if (formStatus === "NOT_JOINING") {
                     srmToAdminMsg += `\nNot joining. Intent - ${formIntentLevel}`;
+                } else {
+                    srmToAdminMsg += `\nStatus: ${STATUS_CONFIG.find(s => s.value === formStatus)?.label}`;
                 }
 
                 batch.set(adminNoteRef, {
@@ -540,27 +571,37 @@ export default function EnquiryActionCard({ enquiry, onClose, onUpdate, isInline
                                           </span>
                                       </label>
                                     </div>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        <div>
-                                            <select 
-                                                value={formNextAction} 
-                                                onChange={e => { setFormNextAction(e.target.value); setUseSameAsBefore(false); }}
-                                                className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none focus:ring-1 focus:ring-[#C5A880]"
-                                            >
-                                                {NEXT_ACTIONS.map(action => (
-                                                    <option key={action} value={action}>{action}</option>
-                                                ))}
-                                            </select>
+                                    
+                                    {/* DYNAMIC NEXT STEP UI */}
+                                    {formStatus === "READY_DEMO" ? (
+                                        <div className="space-y-3">
+                                            <div className="text-sm font-bold text-[#4A4036]">Demo class date and time</div>
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <input 
+                                                    type="date" 
+                                                    value={formNextDate} 
+                                                    onChange={e => { setFormNextDate(e.target.value); setUseSameAsBefore(false); }} 
+                                                    className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none" 
+                                                />
+                                                <input 
+                                                    type="time" 
+                                                    value={formNextTime} 
+                                                    onChange={e => { setFormNextTime(e.target.value); setUseSameAsBefore(false); }} 
+                                                    className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none" 
+                                                />
+                                            </div>
                                         </div>
-                                        <div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 gap-3 items-center">
+                                            <div className="p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036]/50 italic">Call back</div>
                                             <input 
                                                 type="date" 
                                                 value={formNextDate} 
                                                 onChange={e => { setFormNextDate(e.target.value); setUseSameAsBefore(false); }} 
-                                                className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none focus:ring-1 focus:ring-[#C5A880]" 
+                                                className="w-full p-2.5 bg-[#F5F0EB] rounded-lg font-bold text-sm text-[#4A4036] outline-none" 
                                             />
                                         </div>
-                                    </div>
+                                    )}
                                 </div>
                             )}
                         </div>
