@@ -188,6 +188,16 @@ export default function SRMDashboard() {
       router.push("/login");
   };
 
+  // Helper for 12-hour formatting
+  const formatTimeTo12h = (time24: string) => {
+    if (!time24) return "";
+    const [hours, minutes] = time24.split(':');
+    const h = parseInt(hours);
+    const ampm = h >= 12 ? 'PM' : 'AM';
+    const h12 = h % 12 || 12;
+    return `${h12}:${minutes} ${ampm}`;
+  };
+
   const handleSaveEnquiry = async () => {
       if (!form.name || !form.phone || !form.nextActionDate) return alert("Please fill Name, Phone and Next Action Date.");
       setSaving(true);
@@ -196,8 +206,10 @@ export default function SRMDashboard() {
           const yearLastDigit = now.getFullYear().toString().slice(-1);
           const month = String(now.getMonth() + 1).padStart(2, '0');
           const day = String(now.getDate()).padStart(2, '0');
-          const startOfDay = new Date(now.setHours(0, 0, 0, 0));
-          const endOfDay = new Date(now.setHours(23, 59, 59, 999));
+          
+          const startOfDay = new Date(new Date().setHours(0, 0, 0, 0));
+          const endOfDay = new Date(new Date().setHours(23, 59, 59, 999));
+          
           const q = query(collection(db, "enquiries"), where("createdAt", ">=", Timestamp.fromDate(startOfDay)), where("createdAt", "<=", Timestamp.fromDate(endOfDay)));
           const snap = await getCountFromServer(q);
           const enqId = `Q${yearLastDigit}${month}${day}${String.fromCharCode(97 + snap.data().count)}`;
@@ -210,25 +222,68 @@ export default function SRMDashboard() {
 
           const batch = writeBatch(db);
           const newEnqRef = doc(collection(db, "enquiries"));
-          const parentData = {
-              ...form,
-              enqId,
+          const adminNoteRef = doc(collection(db, "admin_notifications")); // Added reference
+          
+          // Format remark
+          let finalRemark = form.remark || "";
+          let adminMsg = `${appUser?.name || 'SRM'} created an enquiry "${form.name}"\nRemark - "${form.remark || 'No remark added'}"`;
+
+          if (form.status === "READY_DEMO") {
+              const timeStr = form.nextActionTime ? ` at ${formatTimeTo12h(form.nextActionTime)}` : "";
+              const dateStr = format(combinedDate, "dd MMM yyyy");
+              finalRemark += ` (Demo Class on ${dateStr}${timeStr})`;
+              adminMsg = `${appUser?.name || 'SRM'} created an enquiry "${form.name}"\nDemo class scheduled on ${dateStr}${timeStr}`;
+          }
+
+          // 1. Create the Enquiry
+          batch.set(newEnqRef, {
+              name: form.name,
+              phone: form.phone,
+              source: form.source,
+              enqId: enqId,
+              status: form.status,
+              lastAction: form.action,
+              lastActionDate: null, 
+              lastRemark: finalRemark,
+              nextAction: form.nextAction,
               nextActionDate: Timestamp.fromDate(combinedDate),
               srmId: appUser?.srmId || "Unknown",
               srmName: appUser?.name || "Unknown",
               createdAt: Timestamp.now(),
-              lastActionDate: null,
-              lastRemark: form.remark
-          };
+          });
 
-          batch.set(newEnqRef, parentData);
+          // 2. Create the Timeline Entry
           const timelineRef = doc(collection(db, "enquiries", newEnqRef.id, "timeline"));
-          batch.set(timelineRef, { action: form.action, remark: form.remark, date: Timestamp.now(), status: form.status, by: appUser?.name || "SRM" });
+          batch.set(timelineRef, { 
+              action: form.action, 
+              remark: finalRemark, 
+              date: Timestamp.now(), 
+              status: form.status, 
+              by: appUser?.name || "SRM" 
+          });
+
+          // 3. Create the Admin Notification
+          batch.set(adminNoteRef, {
+            srmId: appUser?.srmId || "Unknown",
+            srmName: appUser?.name || "Unknown",
+            enquiryId: newEnqRef.id,
+            enquiryName: form.name,
+            type: "system",
+            status: form.status,
+            message: adminMsg,
+            createdAt: Timestamp.now(),
+            read: false
+          });
           
           await batch.commit();
           setIsModalOpen(false);
           setForm(initialForm);
-      } catch (e) { alert("Failed to save enquiry."); } finally { setSaving(false); }
+      } catch (e) { 
+        console.error(e);
+        alert("Failed to save enquiry."); 
+      } finally { 
+        setSaving(false); 
+      }
   };
 
   const menuItems = [
